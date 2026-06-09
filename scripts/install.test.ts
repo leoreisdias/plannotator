@@ -660,7 +660,7 @@ describe("install shared behavior", () => {
     expect(ps).toContain("[Console]::IsInputRedirected");
     // cmd probes for a real console via `timeout /t 0` (errors when stdin is
     // redirected) so CI/redirected runs never see the wizard — and never run
-    // the wizard-only installs (npx extras, Glimpse). set /p's empty-at-EOF
+    // the wizard-only install (npx extras). set /p's empty-at-EOF
     // behavior remains as a second line of defense against hangs.
     expect(cmdScript).toContain("timeout /t 0");
     expect(cmdScript).toContain('if "!CAN_PROMPT!"=="1"');
@@ -669,23 +669,21 @@ describe("install shared behavior", () => {
     // that timed out to synthetic fallbacks (unattended /dev/tty) must not be
     // persisted — ask_yes_no returns non-zero on timeout/EOF, each prompt ORs
     // that into wizard_timed_out, and the prefs write is gated on it.
-    expect(sh).toContain('if [ "$wizard_timed_out" -eq 0 ] && { [ "$run_wizard" -eq 1 ] || [ -n "$EXTRAS_FLAG" ] || [ -n "$MODEL_INVOCABLE_FLAG" ] || [ -n "$GLIMPSE_FLAG" ]; }');
+    expect(sh).toContain('if [ "$wizard_timed_out" -eq 0 ] && { [ "$run_wizard" -eq 1 ] || [ -n "$EXTRAS_FLAG" ] || [ -n "$MODEL_INVOCABLE_FLAG" ]; }');
     expect(sh).toContain("wizard_timed_out=0");
     expect(sh).toContain("|| wizard_timed_out=1");
     expect(sh).toMatch(/echo "no"\s+return 1/);
     // The bounded read stays in a tested context (`|| rc=$?`) so `set -e` never
     // aborts ask_yes_no on a timeout/EOF, regardless of how it's called.
     expect(sh).toContain('< /dev/tty || rc=$?');
-    expect(ps).toContain("if ($runWizard -or $Extras -or $NoExtras -or $ModelInvocable -or $Glimpse -or $NoGlimpse)");
+    expect(ps).toContain("if ($runWizard -or $Extras -or $NoExtras -or $ModelInvocable)");
     expect(cmdScript).toContain('if "!DO_PERSIST!"=="1"');
-    // Glimpse question: detect-on-PATH skip + global npm install in all three.
+    // The Glimpse install option was removed — installers must not reference it
+    // (the runtime still auto-detects glimpseui on PATH; that lives elsewhere).
     for (const s of [sh, ps, cmdScript]) {
-      expect(s).toContain("glimpseui");
-      expect(s).toContain("npm install -g glimpseui");
+      expect(s).not.toContain("glimpseui");
+      expect(s.toLowerCase()).not.toContain("--no-glimpse");
     }
-    expect(sh).toContain("--no-glimpse");
-    expect(ps).toContain("[switch]$NoGlimpse");
-    expect(cmdScript).toContain('"%~1"=="--no-glimpse"');
     // Flip pass in all three: SKILL.md line removal + Codex sidecar flip.
     expect(ps).toContain('Where-Object { $_ -ne "disable-model-invocation: true" }');
     expect(cmdScript).toContain('findstr /v /c:"disable-model-invocation: true"');
@@ -997,6 +995,14 @@ describe("install shared behavior", () => {
     expect(cmdScript).toContain("Skipping semantic diff sidecar install");
     expect(cmdScript).toContain("Get-ChildItem -Path $env:SEM_EXTRACT -Filter sem.exe -Recurse -File");
     expect(cmdScript).toContain('copy /y "!EXTRACTED_SEM!" "!SEM_PATH!"');
+
+    // The sidecar download is time-bounded so a slow/hung fetch can't wedge an
+    // install where plannotator itself already landed (all three installers).
+    expect(sh).toContain("--connect-timeout 10 --max-time 120");
+    expect(ps).toContain("-TimeoutSec 120");
+    expect(cmdScript).toContain("--connect-timeout 10 --max-time 120");
+    // And the opt-out is documented in the help text.
+    expect(sh).toContain("PLANNOTATOR_SKIP_SEM_INSTALL=1");
   });
 
   test("install.sh and help text use vX.Y.Z placeholder not v0.17.1", () => {
