@@ -22,6 +22,7 @@ import type {
 } from '@plannotator/ui/types';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { usePierreTheme } from '../hooks/usePierreTheme';
+import { useIsWorkerPoolReadyOrDisabled, useWorkerPoolThemeSync } from '../workerPool';
 import type { DiffFile } from '../types';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
 import { buildCodeNavRequest } from '../utils/buildCodeNavRequest';
@@ -365,6 +366,11 @@ const PANEL_HEADER_HEIGHT = 33; // --panel-header-h
 // OUR unsafeCSS rule rather than silently tracking a library default.
 const HUNK_SEPARATOR_HEIGHT = 32;
 
+// How long the scroller must be quiet before queued augmentation applies
+// (item growth + re-render) are allowed to land. Slightly above Pierre's own
+// post-interaction restore delay (120ms).
+const AUGMENT_APPLY_IDLE_MS = 150;
+
 export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   files,
   diffStyle,
@@ -414,6 +420,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // way — we keep `true` to be explicit that the built-in title is irrelevant
   // here (our FileHeader owns all header chrome).
   const pierreTheme = usePierreTheme({ fontFamily, fontSize, showFileHeader: true });
+  // Worker-pool highlighting: wait for the pool so the first tokenization
+  // wave runs in workers (not a main-thread fallback), and keep the pool's
+  // theme pair in step with the UI theme.
+  const workerPoolReady = useIsWorkerPoolReadyOrDisabled();
+  useWorkerPoolThemeSync(pierreTheme.syntaxTheme);
   const viewerRef = useRef<CodeViewHandle<DiffAnnotationMetadata> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const toolbarHostRef = useRef<ToolbarHostHandle>(null);
@@ -807,6 +818,45 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const fileSetKeyRef = useRef(fileSetKey);
   fileSetKeyRef.current = fileSetKey;
 
+  // Augmentation APPLIES are deferred to scroll-idle. updateItem() mutates
+  // item layout — the full-content parse counts collapsed-context regions the
+  // raw-patch parse doesn't, so the item GROWS — and forces a re-render +
+  // re-tokenize. Landing that mid-gesture causes visible chop; worse, when
+  // the grown item sits ABOVE CodeView's scroll anchor, its corrective
+  // scrollTo() kills wheel momentum and pins the viewport ("scrolling but
+  // nothing changes"). Fetches still start as items enter the window — only
+  // the item mutation waits for the scroll to settle. Staleness is re-checked
+  // at apply time; the per-item map keeps only the newest apply per item.
+  const pendingAugmentAppliesRef = useRef(new Map<string, () => void>());
+  const augmentFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastScrollTsRef = useRef(0);
+
+  const flushAugmentApplies = useCallback(() => {
+    augmentFlushTimerRef.current = null;
+    const idleFor = Date.now() - lastScrollTsRef.current;
+    if (idleFor < AUGMENT_APPLY_IDLE_MS) {
+      augmentFlushTimerRef.current = setTimeout(
+        flushAugmentApplies,
+        AUGMENT_APPLY_IDLE_MS - idleFor + 10,
+      );
+      return;
+    }
+    const applies = [...pendingAugmentAppliesRef.current.values()];
+    pendingAugmentAppliesRef.current.clear();
+    for (const apply of applies) apply();
+  }, []);
+
+  const queueAugmentApply = useCallback((itemId: string, apply: () => void) => {
+    pendingAugmentAppliesRef.current.set(itemId, apply);
+    if (augmentFlushTimerRef.current == null) {
+      augmentFlushTimerRef.current = setTimeout(flushAugmentApplies, AUGMENT_APPLY_IDLE_MS);
+    }
+  }, [flushAugmentApplies]);
+
+  useEffect(() => () => {
+    if (augmentFlushTimerRef.current != null) clearTimeout(augmentFlushTimerRef.current);
+  }, []);
+
   // Fetch full file contents for one item, reparse with processFile, and swap
   // the item's fileDiff in place so hunk expansion (expand-unchanged gutter
   // controls) works against the COMPLETE file. Mirrors LazyFileDiff's per-mount
@@ -907,31 +957,38 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           return;
         }
 
-        // Re-check right before the write: processFile above is synchronous but
-        // an abort / diff switch could have landed since the first check.
         if (isStale()) return;
-        const liveHandle = viewerRef.current;
-        const item = liveHandle?.getItem(itemId);
-        // The item may have been torn down between fetch start and resolution;
-        // belt-and-suspenders on top of the staleness check above.
-        if (liveHandle == null || item == null || item.type !== 'diff') {
-          augmentState.set(itemId, { status: 'done', controller, generation });
-          return;
-        }
 
-        // cacheKey MUST change when fileDiff contents change (types.ts warning):
-        // otherwise the worker / highlight caches would serve the stale partial
-        // AST. Derive a fresh key from the augmented (now full-content) diff,
-        // scoped by generation so the same item id across diff switches never
-        // collides in a (future) cross-mount worker cache.
-        augmented.cacheKey = `${generation}::${itemId}#full`;
-        item.fileDiff = augmented;
-        item.version = (item.version ?? 0) + 1;
-        // updateItem re-measures the (now taller) item and resolves the captured
-        // scroll anchor, so the viewport stays put whether this item is above or
-        // below the fold — no manual scroll correction needed.
-        liveHandle.updateItem(item);
-        augmentState.set(itemId, { status: 'done', controller, generation });
+        // Defer the item mutation to scroll-idle (see queueAugmentApply) —
+        // landing it mid-gesture chops scrolling and can kill momentum via
+        // CodeView's anchor-correcting scrollTo. All staleness checks re-run
+        // at apply time: the queue can hold entries across aborts and diff
+        // switches.
+        queueAugmentApply(itemId, () => {
+          if (isStale()) return;
+          const liveHandle = viewerRef.current;
+          const item = liveHandle?.getItem(itemId);
+          // The item may have been torn down between fetch start and apply;
+          // belt-and-suspenders on top of the staleness check above.
+          if (liveHandle == null || item == null || item.type !== 'diff') {
+            augmentState.set(itemId, { status: 'done', controller, generation });
+            return;
+          }
+
+          // cacheKey MUST change when fileDiff contents change (types.ts warning):
+          // otherwise the worker / highlight caches would serve the stale partial
+          // AST. Derive a fresh key from the augmented (now full-content) diff,
+          // scoped by generation so the same item id across diff switches never
+          // collides in a (future) cross-mount worker cache.
+          augmented.cacheKey = `${generation}::${itemId}#full`;
+          item.fileDiff = augmented;
+          item.version = (item.version ?? 0) + 1;
+          // updateItem re-measures the (now taller) item and resolves the captured
+          // scroll anchor, so the viewport stays put whether this item is above or
+          // below the fold — no manual scroll correction needed.
+          liveHandle.updateItem(item);
+          augmentState.set(itemId, { status: 'done', controller, generation });
+        });
       })
       .catch((err) => {
         if (isStale()) {
@@ -945,7 +1002,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         augmentState.set(itemId, { status: 'error', controller, generation });
         void err;
       });
-  }, []);
+  }, [queueAugmentApply]);
 
   // (Re)apply search marks for ONE item's node. Called on every render of that
   // item (onPostRender mount/update) so marks survive CodeView's element
@@ -1399,12 +1456,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // At-bottom override (legacy parity): a short final file pinned at the
     // container bottom never gets its top above scrollTop+threshold, so the
     // loop would leave an earlier file active while the user reads the last
-    // one. DOM scrollTop/scrollHeight are consistent with each other even
-    // under CodeView's paged scroll rebasing, so this check is safe.
-    const container = scrollRef.current;
+    // one. Uses CodeView's cached accessors — raw container.scrollHeight /
+    // clientHeight reads here forced a synchronous layout on EVERY scroll
+    // event, right after the frame's DOM writes (measurable jank).
     if (
-      container != null &&
-      container.scrollTop + container.clientHeight >= container.scrollHeight - 2
+      viewer.getScrollTop() + viewer.getHeight() >= viewer.getScrollHeight() - 2
     ) {
       bestId = rendered[rendered.length - 1].id;
     }
@@ -1415,9 +1471,22 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     }
   });
 
+  // Coalesced to one run per animation frame — CodeView fires onScroll per
+  // scroll EVENT, which can outpace frames during momentum scrolling. Also
+  // stamps scroll activity for the augmentation idle-flush.
+  const scrollReportRafRef = useRef<number | null>(null);
   const handleScroll = useStableCallback(() => {
-    reportVisibleFile();
+    lastScrollTsRef.current = Date.now();
+    if (scrollReportRafRef.current != null) return;
+    scrollReportRafRef.current = requestAnimationFrame(() => {
+      scrollReportRafRef.current = null;
+      reportVisibleFile();
+    });
   });
+
+  useEffect(() => () => {
+    if (scrollReportRafRef.current != null) cancelAnimationFrame(scrollReportRafRef.current);
+  }, []);
 
   // CodeView's onScroll only fires on actual scroll, so seed the initial
   // active-file highlight once the viewer has rendered its first window. rAF
@@ -1598,6 +1667,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       <FileHeader
         filePath={filePath}
         patch={file.patch}
+        status={file.status}
+        oldPath={file.oldPath}
         isViewed={viewedFiles?.has(filePath)}
         onToggleViewed={onToggleViewed ? () => handleToggleViewedAndCollapse(filePath, item.id) : undefined}
         isStaged={stagedFiles?.has(filePath)}
@@ -1681,12 +1752,18 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         hunkSeparatorHeight: HUNK_SEPARATOR_HEIGHT,
         ...(customLineHeight != null && { lineHeight: customLineHeight }),
       },
-      // Dev-only safety net for the hand-maintained itemMetrics above: Pierre
+      // Opt-in safety net for the hand-maintained itemMetrics above: Pierre
       // compares its virtualization estimates against measured DOM heights and
-      // warns on drift. Doubly gated — the option only takes effect when the
-      // library itself runs a development build (NODE_ENV), so it is inert in
-      // production even if the flag leaks through.
-      ...(import.meta.env.DEV && { __devOnlyValidateItemHeights: true }),
+      // warns on drift. Explicit env opt-in (VITE_PIERRE_VALIDATE_HEIGHTS=1)
+      // rather than blanket DEV: validation runs getBoundingClientRect() per
+      // rendered item per frame inside the scroll loop — it made the dev
+      // server's scrolling visibly choppy on its own. Still doubly gated: the
+      // option only takes effect when the library itself runs a development
+      // build (NODE_ENV), so it is inert in production even if it leaks.
+      ...(import.meta.env.DEV &&
+        import.meta.env.VITE_PIERRE_VALIDATE_HEIGHTS === '1' && {
+          __devOnlyValidateItemHeights: true,
+        }),
       onLineSelectionEnd(range, context) {
         handleLineSelectionEnd(range, context.item);
       },
@@ -1737,6 +1814,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     ],
   );
 
+  // After all hooks: hold the surface until the worker pool can take the
+  // first tokenization wave (≈100-300ms once per session; instant after).
+  if (!workerPoolReady) {
+    return <div className="relative h-full" />;
+  }
+
   return (
     <div className="relative h-full">
       <CodeView<DiffAnnotationMetadata>
@@ -1747,7 +1830,13 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         key={fileSetKey}
         ref={viewerRef}
         containerRef={scrollRef}
-        className="h-full overflow-auto"
+        // Containment mirrors Pierre's own production wrapper (diffshub
+        // CodeViewWrapper): without it, every forced layout during scrolling
+        // recomputes the whole document instead of the clipped subtree.
+        // overflow-anchor:none disables the BROWSER's scroll anchoring, which
+        // otherwise fights CodeView's own anchor resolution whenever item
+        // heights change (our augmentation applies).
+        className="h-full overflow-y-auto overflow-x-clip overscroll-contain [contain:strict] [overflow-anchor:none] [will-change:scroll-position] [&_diffs-container]:overflow-clip [&_diffs-container]:[contain:layout_paint_style]"
         initialItems={identity.items}
         options={options}
         selectedLines={selectedLines}

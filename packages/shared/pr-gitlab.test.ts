@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { fetchGlMR, parsePaginatedArray } from "./pr-gitlab";
 import type { PRRuntime } from "./pr-types";
 
@@ -152,6 +152,38 @@ describe("fetchGlMR raw_diffs fallback", () => {
     expect(calls.some((c) => c.includes("/diffs?per_page=100"))).toBe(true);
   });
 
+  test("reconstructed renames carry a similarity line so parsers classify them as renames", async () => {
+    const entries = JSON.stringify([
+      {
+        old_path: "src/old.ts",
+        new_path: "src/new.ts",
+        new_file: false,
+        deleted_file: false,
+        renamed_file: true,
+        diff: "", // pure rename — GitLab sends an empty diff
+      },
+      {
+        old_path: "src/before.ts",
+        new_path: "src/after.ts",
+        new_file: false,
+        deleted_file: false,
+        renamed_file: true,
+        diff: "@@ -1 +1 @@\n-a\n+b\n",
+      },
+    ]);
+    const { runtime } = gitlabRuntime({
+      rawDiffs: { exitCode: 1, stderr: "404 Not Found" },
+      diffs: { exitCode: 0, stdout: entries },
+    });
+    const result = await fetchGlMR(runtime, REF);
+    expect(result.rawPatch).toContain(
+      "diff --git a/src/old.ts b/src/new.ts\nsimilarity index 100%\nrename from src/old.ts\nrename to src/new.ts",
+    );
+    expect(result.rawPatch).toContain(
+      "diff --git a/src/before.ts b/src/after.ts\nsimilarity index 99%\nrename from src/before.ts\nrename to src/after.ts",
+    );
+  });
+
   test("falls back when raw_diffs returns empty (oversized MR)", async () => {
     const { runtime, calls } = gitlabRuntime({
       rawDiffs: { exitCode: 0, stdout: "" },
@@ -160,6 +192,136 @@ describe("fetchGlMR raw_diffs fallback", () => {
     const result = await fetchGlMR(runtime, REF);
     expect(result.rawPatch).toContain("diff --git a/src/a.ts b/src/a.ts");
     expect(calls.some((c) => c.includes("/diffs?per_page=100"))).toBe(true);
+  });
+
+  test("flags the patch incomplete when GitLab withholds content for a modified file", async () => {
+    const entries = JSON.stringify([
+      {
+        old_path: "src/big.ts",
+        new_path: "src/big.ts",
+        new_file: false,
+        deleted_file: false,
+        renamed_file: false,
+        diff: "", // modified file with no content = withheld
+      },
+      {
+        old_path: "src/old.ts",
+        new_path: "src/new.ts",
+        new_file: false,
+        deleted_file: false,
+        renamed_file: true,
+        diff: "", // pure rename — complete information, must not flag
+      },
+    ]);
+    const { runtime } = gitlabRuntime({
+      rawDiffs: { exitCode: 1, stderr: "404 Not Found" },
+      diffs: { exitCode: 0, stdout: entries },
+    });
+
+    const errSpy = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const result = await fetchGlMR(runtime, REF);
+      expect(result.patchIncomplete).toBe(true);
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  test("too_large/collapsed flags catch withheld ADDED files (modern GitLab)", async () => {
+    // A too-large added file has new_file:true and an empty diff — without
+    // the explicit flag it would be indistinguishable from a legitimately
+    // empty new file and the upgrade would never be offered.
+    const entries = JSON.stringify([
+      {
+        old_path: "src/huge.ts",
+        new_path: "src/huge.ts",
+        new_file: true,
+        deleted_file: false,
+        renamed_file: false,
+        too_large: true,
+        collapsed: false,
+        diff: "",
+      },
+    ]);
+    const { runtime } = gitlabRuntime({
+      rawDiffs: { exitCode: 1, stderr: "404 Not Found" },
+      diffs: { exitCode: 0, stdout: entries },
+    });
+
+    const errSpy = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const result = await fetchGlMR(runtime, REF);
+      expect(result.patchIncomplete).toBe(true);
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  test("null too_large/collapsed are inconclusive — the legacy heuristic still decides", async () => {
+    const entries = JSON.stringify([
+      {
+        old_path: "src/big.ts",
+        new_path: "src/big.ts",
+        new_file: false,
+        deleted_file: false,
+        renamed_file: false,
+        too_large: null,
+        collapsed: null,
+        diff: "", // modified file, no content, flags unknown → withheld
+      },
+    ]);
+    const { runtime } = gitlabRuntime({
+      rawDiffs: { exitCode: 1, stderr: "404 Not Found" },
+      diffs: { exitCode: 0, stdout: entries },
+    });
+
+    const errSpy = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const result = await fetchGlMR(runtime, REF);
+      expect(result.patchIncomplete).toBe(true);
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  test("explicit too_large:false exonerates empty-diff entries (binary/empty files, modern GitLab)", async () => {
+    const entries = JSON.stringify([
+      {
+        old_path: "logo.png",
+        new_path: "logo.png",
+        new_file: false,
+        deleted_file: false,
+        renamed_file: false,
+        too_large: false,
+        collapsed: false,
+        diff: "", // binary — complete information, must not flag
+      },
+      {
+        old_path: "src/ok.ts",
+        new_path: "src/ok.ts",
+        new_file: false,
+        deleted_file: false,
+        renamed_file: false,
+        too_large: false,
+        collapsed: false,
+        diff: "@@ -1 +1 @@\n-a\n+b\n",
+      },
+    ]);
+    const { runtime } = gitlabRuntime({
+      rawDiffs: { exitCode: 1, stderr: "404 Not Found" },
+      diffs: { exitCode: 0, stdout: entries },
+    });
+    const result = await fetchGlMR(runtime, REF);
+    expect(result.patchIncomplete).toBeFalsy();
+  });
+
+  test("does not flag a fallback where every entry carries content", async () => {
+    const { runtime } = gitlabRuntime({
+      rawDiffs: { exitCode: 1, stderr: "404 Not Found" },
+      diffs: { exitCode: 0, stdout: DIFF_ENTRIES_JSON },
+    });
+    const result = await fetchGlMR(runtime, REF);
+    expect(result.patchIncomplete).toBeFalsy();
   });
 
   test("throws a clear empty-diff error when both raw_diffs and diffs are empty", async () => {

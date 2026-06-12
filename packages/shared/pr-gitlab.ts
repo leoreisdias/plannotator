@@ -41,64 +41,14 @@ interface GitLabDiffEntry {
   new_file: boolean;
   deleted_file: boolean;
   renamed_file: boolean;
+  /** Content withheld because the file's diff exceeds GitLab's size limits. Absent on older GitLab. */
+  too_large?: boolean | null;
+  /** Diff collapsed (content omitted from the response). Absent on older GitLab. */
+  collapsed?: boolean | null;
 }
 
-/**
- * Parse output of `glab api --paginate`.
- *
- * glab concatenates pages as adjacent JSON arrays (`[...][...]`) which is not
- * valid JSON. Walk the output, split it into top-level arrays, and merge them.
- * Single-page output (the common case) round-trips through the same path.
- */
-export function parsePaginatedArray<T>(stdout: string): T[] {
-  const trimmed = stdout.trim();
-  if (!trimmed) return [];
-
-  const slices: string[] = [];
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-  let start = -1;
-
-  for (let i = 0; i < trimmed.length; i++) {
-    const c = trimmed[i];
-    if (inString) {
-      if (escape) {
-        escape = false;
-      } else if (c === "\\") {
-        escape = true;
-      } else if (c === '"') {
-        inString = false;
-      }
-      continue;
-    }
-    if (c === '"') {
-      inString = true;
-      continue;
-    }
-    if (c === "[" || c === "{") {
-      if (depth === 0 && c === "[") start = i;
-      depth++;
-    } else if (c === "]" || c === "}") {
-      depth--;
-      if (depth === 0 && c === "]" && start !== -1) {
-        slices.push(trimmed.slice(start, i + 1));
-        start = -1;
-      }
-    }
-  }
-
-  if (slices.length === 0) {
-    return JSON.parse(trimmed) as T[];
-  }
-
-  const merged: T[] = [];
-  for (const slice of slices) {
-    const page = JSON.parse(slice) as T[];
-    if (Array.isArray(page)) merged.push(...page);
-  }
-  return merged;
-}
+export { parsePaginatedArray } from "./cli-pagination";
+import { parsePaginatedArray } from "./cli-pagination";
 
 /**
  * Reconstruct a unified patch from GitLab's merge_request diffs API response.
@@ -117,6 +67,10 @@ function reconstructPatch(diffs: GitLabDiffEntry[]): string {
 
     let header = `diff --git a/${displayOld} b/${displayNew}`;
     if (d.renamed_file) {
+      // Diff parsers (e.g. Pierre's) key rename classification off the
+      // similarity line; the API doesn't expose the score, so emit 100% for
+      // pure renames (empty diff) and a synthetic <100% otherwise.
+      header += d.diff.trim() === "" ? "\nsimilarity index 100%" : "\nsimilarity index 99%";
       header += `\nrename from ${d.old_path}\nrename to ${d.new_path}`;
     }
     if (d.new_file) {
@@ -164,10 +118,34 @@ export async function getGlUser(runtime: PRRuntime, host: string): Promise<strin
 
 // --- Fetch MR ---
 
+/**
+ * True when a JSON diffs-API entry should carry diff content but doesn't.
+ *
+ * Modern GitLab marks withheld content explicitly per entry (`too_large`,
+ * `collapsed`) — authoritative both ways: a too-large ADDED file is caught
+ * (it would otherwise be indistinguishable from a legitimately empty new
+ * file), and binaries/empty files are never misflagged.
+ *
+ * Older GitLab (the same versions this JSON fallback exists for) omits the
+ * flags entirely; there an empty diff on a plain modification is the only
+ * reliable withheld signal — empty adds/deletes/renames stay exempt.
+ */
+function entryMissingContent(d: GitLabDiffEntry): boolean {
+  if (d.diff.trim() !== "") return false;
+  if (d.too_large || d.collapsed) return true;
+  // == null catches both absent (old GitLab) and explicit null (GitLab emits
+  // null for unknown on sibling fields like generated_file) — either way the
+  // flags are inconclusive and the heuristic must decide.
+  if (d.too_large == null && d.collapsed == null) {
+    return !d.renamed_file && !d.new_file && !d.deleted_file;
+  }
+  return false;
+}
+
 export async function fetchGlMR(
   runtime: PRRuntime,
   ref: GlMRRef,
-): Promise<{ metadata: PRMetadata; rawPatch: string }> {
+): Promise<{ metadata: PRMetadata; rawPatch: string; patchIncomplete?: boolean }> {
   const encoded = encodeProject(ref.projectPath);
 
   // Primary: raw_diffs — preserves Git's binary-marker shape and includes
@@ -188,6 +166,7 @@ export async function fetchGlMR(
   // returns empty (very large MRs that exceed its safety limit). Reconstruct a
   // unified patch from the JSON entries — the long-standing pre-raw_diffs path.
   let rawPatch: string;
+  let patchIncomplete = false;
   if (diffResult.exitCode === 0 && diffResult.stdout.trim()) {
     rawPatch = diffResult.stdout;
   } else {
@@ -200,11 +179,19 @@ export async function fetchGlMR(
       const fbErr = fallback.stderr.trim() || `exit code ${fallback.exitCode}`;
       throw new Error(`Failed to fetch MR diff (raw_diffs: ${rawErr}; diffs: ${fbErr}).`);
     }
-    rawPatch = reconstructPatch(parsePaginatedArray<GitLabDiffEntry>(fallback.stdout));
+    const entries = parsePaginatedArray<GitLabDiffEntry>(fallback.stdout);
+    rawPatch = reconstructPatch(entries);
     if (!rawPatch.trim()) {
       throw new Error(
         "MR diff is empty — the diff may be too large to fetch via the GitLab API. Review it on the GitLab web UI.",
       );
+    }
+    const missingContent = entries.filter(entryMissingContent).length;
+    if (missingContent > 0) {
+      console.error(
+        `Warning: GitLab omitted diff content for ${missingContent} file(s) (MR too large). They appear in the review without hunks; the full diff can be recomputed locally once the checkout is ready.`,
+      );
+      patchIncomplete = true;
     }
   }
 
@@ -249,7 +236,7 @@ export async function fetchGlMR(
     url: raw.web_url,
   };
 
-  return { metadata, rawPatch };
+  return { metadata, rawPatch, ...(patchIncomplete && { patchIncomplete }) };
 }
 
 // --- MR Context ---
