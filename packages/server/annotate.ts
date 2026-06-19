@@ -17,17 +17,21 @@ import type { Origin } from "@plannotator/shared/agents";
 import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, handleSaveNotes } from "./shared-handlers";
 import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc } from "./reference-handlers";
 import { handleFileBrowserFilesStream } from "./reference-watch";
-import { warmFileListCache } from "@plannotator/shared/resolve-file";
+import { resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
 import { contentHash, deleteDraft } from "./draft";
 import { disabledSourceSave, type SourceSaveRequest } from "@plannotator/shared/source-save";
+import { getAnnotateReferenceRootPaths } from "@plannotator/shared/annotate-reference-roots-node";
 import {
 	createSourceSaveCapability,
+	createSourceSaveCapabilityFromText,
 	readSourceFileSnapshot,
 	resolveFolderSourceFile,
+	resolveFolderSourceFileForSave,
 	saveSourceFileAtomic,
 } from "@plannotator/shared/source-save-node";
 import { createExternalAnnotationHandler } from "./external-annotations";
 import { saveConfig, detectGitUser, getServerConfig } from "./config";
+import { existsSync } from "fs";
 import { dirname, resolve as resolvePath } from "path";
 import { isWithinDirectory } from "@plannotator/shared/html-assets-node";
 import { isWSL } from "./browser";
@@ -192,6 +196,17 @@ export async function startAnnotateServer(
     return false;
   }
 
+  const singleFileSourceSaveEligible = mode === "annotate" && !sourceConverted && !(renderHtml && rawHtml) && !/^https?:\/\//i.test(filePath);
+  const initialSingleFileSourceSave = singleFileSourceSaveEligible
+    ? createSourceSaveCapability("single-file", filePath)
+    : null;
+  const initialSingleFileSourcePath = singleFileSourceSaveEligible
+    ? initialSingleFileSourceSave?.enabled
+      ? initialSingleFileSourceSave.path
+      : resolveUserPath(filePath)
+    : null;
+  const openedSourceFilePaths = new Set<string>();
+  if (initialSingleFileSourcePath) openedSourceFilePaths.add(initialSingleFileSourcePath);
   const getPrimarySource = () => {
     if (mode === "annotate-last") {
       return { plan: markdown, sourceSave: disabledSourceSave("message-mode") };
@@ -209,8 +224,14 @@ export async function startAnnotateServer(
       return { plan: markdown, sourceSave: disabledSourceSave("not-local-file") };
     }
 
-    const sourceSave = createSourceSaveCapability("single-file", filePath);
+    const sourceSave = createSourceSaveCapability("single-file", initialSingleFileSourcePath ?? filePath);
     if (!sourceSave.enabled) {
+      if (sourceSave.reason === "missing-file" && initialSingleFileSourcePath) {
+        const missingSourceSave = createSourceSaveCapabilityFromText("single-file", initialSingleFileSourcePath, markdown);
+        if (missingSourceSave.enabled) {
+          return { plan: markdown, sourceSave: missingSourceSave };
+        }
+      }
       return { plan: markdown, sourceSave };
     }
 
@@ -231,15 +252,12 @@ export async function startAnnotateServer(
     }
   };
 
-  const getReferenceRootPaths = () => {
-    if (mode === "annotate-folder" && folderPath) {
-      return [folderPath];
-    }
-    if (/^https?:\/\//i.test(filePath)) {
-      return [process.cwd()];
-    }
-    return [process.cwd(), dirname(filePath)];
-  };
+  const getReferenceRootPaths = () => getAnnotateReferenceRootPaths({
+    mode,
+    filePath,
+    folderPath,
+    initialSingleFileSourcePath,
+  });
 
   // Detect repo info (cached for this session)
   const repoInfo = await getRepoInfo();
@@ -352,7 +370,11 @@ export async function startAnnotateServer(
             const docReq = changed ? new Request(docUrl.toString()) : req;
             return handleDoc(docReq, {
               rewriteHtml: htmlAssets.rewriteHtml,
+              sourceSaveFilePath: singleFileSourceSaveEligible
+                ? initialSingleFileSourcePath ?? filePath
+                : undefined,
               sourceSaveFolderPath: mode === "annotate-folder" ? folderPath : undefined,
+              onSourceDocumentServed: (path) => openedSourceFilePaths.add(path),
               rootPaths: getReferenceRootPaths(),
             });
           }
@@ -376,11 +398,21 @@ export async function startAnnotateServer(
             }
 
             let targetPath: string | null = null;
-            if (mode === "annotate" && !sourceConverted && !(renderHtml && rawHtml)) {
-              const capability = createSourceSaveCapability("single-file", filePath);
-              targetPath = capability.enabled ? capability.path : null;
+            if (singleFileSourceSaveEligible) {
+              const capability = createSourceSaveCapability("single-file", initialSingleFileSourcePath ?? filePath);
+              targetPath = capability.enabled ? capability.path : initialSingleFileSourcePath;
             } else if (mode === "annotate-folder" && folderPath && typeof body.path === "string") {
-              targetPath = resolveFolderSourceFile(body.path, folderPath);
+              targetPath = body.allowMissingBase
+                ? resolveFolderSourceFileForSave(body.path, folderPath)
+                : resolveFolderSourceFile(body.path, folderPath);
+              if (
+                body.allowMissingBase &&
+                targetPath &&
+                !existsSync(targetPath) &&
+                !openedSourceFilePaths.has(targetPath)
+              ) {
+                targetPath = null;
+              }
             }
 
             if (!targetPath) {
@@ -390,7 +422,11 @@ export async function startAnnotateServer(
               );
             }
 
-            const result = saveSourceFileAtomic(targetPath, body.text, body.baseHash);
+            const result = saveSourceFileAtomic(targetPath, body.text, body.baseHash, {
+              allowMissingBase: body.allowMissingBase === true,
+              missingBaseEol: body.baseEol,
+              allowedRoot: mode === "annotate-folder" ? folderPath : undefined,
+            });
             const status = result.ok
               ? 200
               : result.code === "conflict"

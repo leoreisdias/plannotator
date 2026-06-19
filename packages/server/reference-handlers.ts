@@ -27,15 +27,22 @@ import {
 	warmFileListCache,
 } from "@plannotator/shared/resolve-file";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
-import { disabledSourceSave, type SourceSaveCapability } from "@plannotator/shared/source-save";
-import { createSourceSaveCapability } from "@plannotator/shared/source-save-node";
+import { disabledSourceSave, type SourceFileSnapshot, type SourceSaveCapability } from "@plannotator/shared/source-save";
+import {
+	createSourceSaveCapability,
+	createSourceSaveCapabilityFromSnapshot,
+	readSourceFileSnapshot,
+	resolveExistingSourceSaveFile,
+} from "@plannotator/shared/source-save-node";
 import { preloadFile } from "@pierre/diffs/ssr";
 
 // --- Route handlers ---
 
 export interface HandleDocOptions {
 	rewriteHtml?: (html: string, filepath: string) => string;
+	sourceSaveFilePath?: string;
 	sourceSaveFolderPath?: string;
+	onSourceDocumentServed?: (path: string) => void;
 	rootPaths?: string[];
 }
 
@@ -140,6 +147,7 @@ function resolveMarkdownFileFromAllowedRoots(input: string, roots: string[]): Ro
 function applyDocOptions<T extends Record<string, unknown>>(
 	data: T,
 	options: HandleDocOptions = {},
+	sourceSnapshot?: SourceFileSnapshot,
 ): T & { sourceSave?: SourceSaveCapability } {
 	const next: Record<string, unknown> = { ...data };
 	if (
@@ -149,9 +157,10 @@ function applyDocOptions<T extends Record<string, unknown>>(
 	) {
 		next.rawHtml = options.rewriteHtml(next.rawHtml, next.filepath);
 	}
-	if (!options.sourceSaveFolderPath) return next as T & { sourceSave?: SourceSaveCapability };
 	if (typeof data.filepath !== "string") {
-		return { ...next, sourceSave: disabledSourceSave("not-local-file") } as T & { sourceSave?: SourceSaveCapability };
+		return options.sourceSaveFolderPath || options.sourceSaveFilePath
+			? { ...next, sourceSave: disabledSourceSave("not-local-file") } as T & { sourceSave?: SourceSaveCapability }
+			: next as T & { sourceSave?: SourceSaveCapability };
 	}
 	if (data.renderAs === "html") {
 		return { ...next, sourceSave: disabledSourceSave("html-render") } as T & { sourceSave?: SourceSaveCapability };
@@ -159,14 +168,29 @@ function applyDocOptions<T extends Record<string, unknown>>(
 	if (data.isConverted === true) {
 		return { ...next, sourceSave: disabledSourceSave("converted-source") } as T & { sourceSave?: SourceSaveCapability };
 	}
+	if (options.sourceSaveFilePath) {
+		const sourcePath = resolveExistingSourceSaveFile("single-file", options.sourceSaveFilePath);
+		const doc = sourceSnapshot
+			? createSourceSaveCapabilityFromSnapshot("single-file", data.filepath, sourceSnapshot)
+			: createSourceSaveCapability("single-file", data.filepath);
+		if (sourcePath && doc.enabled && sourcePath === doc.path) {
+			options.onSourceDocumentServed?.(doc.path);
+			return { ...next, sourceSave: doc } as T & { sourceSave?: SourceSaveCapability };
+		}
+	}
+	if (!options.sourceSaveFolderPath) return next as T & { sourceSave?: SourceSaveCapability };
+	const sourceSave = sourceSnapshot
+		? createSourceSaveCapabilityFromSnapshot("folder-file", data.filepath, sourceSnapshot, options.sourceSaveFolderPath)
+		: createSourceSaveCapability("folder-file", data.filepath, options.sourceSaveFolderPath);
+	if (sourceSave.enabled) options.onSourceDocumentServed?.(sourceSave.path);
 	return {
 		...next,
-		sourceSave: createSourceSaveCapability("folder-file", data.filepath, options.sourceSaveFolderPath),
+		sourceSave,
 	} as T & { sourceSave?: SourceSaveCapability };
 }
 
-function docJson(data: Record<string, unknown>, options?: HandleDocOptions): Response {
-	return Response.json(applyDocOptions(data, options));
+function docJson(data: Record<string, unknown>, options?: HandleDocOptions, sourceSnapshot?: SourceFileSnapshot): Response {
+	return Response.json(applyDocOptions(data, options, sourceSnapshot));
 }
 
 /** Serve a linked markdown document. Resolves absolute, relative, or bare filename paths. */
@@ -203,13 +227,18 @@ export async function handleDoc(req: Request, options: HandleDocOptions = {}): P
 		try {
 			const file = Bun.file(fromBase);
 			if (await file.exists()) {
-				const raw = await file.text();
+				const snapshot = readSourceFileSnapshot(fromBase);
+				const raw = snapshot.text;
 				const isHtml = /\.html?$/i.test(requestedPath);
 				if (isHtml && !convert) {
 					return docJson({ rawHtml: raw, renderAs: "html", filepath: fromBase }, options);
 				}
 				const markdown = isHtml ? htmlToMarkdown(raw) : raw;
-				return docJson({ markdown, filepath: fromBase, isConverted: isHtml, renderAs: "markdown" }, options);
+				return docJson(
+					{ markdown, filepath: fromBase, isConverted: isHtml, renderAs: "markdown" },
+					options,
+					isHtml ? undefined : snapshot,
+				);
 			}
 		} catch {
 			/* fall through to standard resolution */
@@ -267,7 +296,7 @@ export async function handleDoc(req: Request, options: HandleDocOptions = {}): P
 					{ status: 400 },
 				);
 			} else if (result.kind === "unavailable") {
-				return Response.json({ error: `Cannot scan project: ${requestedPath}` }, { status: 404 });
+				return Response.json({ error: `Cannot scan project: ${requestedPath}`, reason: "unavailable" }, { status: 503 });
 			} else {
 				return Response.json({ error: `File not found: ${requestedPath}` }, { status: 404 });
 			}
@@ -314,7 +343,14 @@ export async function handleDoc(req: Request, options: HandleDocOptions = {}): P
 		);
 	}
 
-	if (result.kind === "not_found" || result.kind === "unavailable") {
+	if (result.kind === "unavailable") {
+		return Response.json(
+			{ error: `Cannot scan project: ${result.input}`, reason: "unavailable" },
+			{ status: 503 },
+		);
+	}
+
+	if (result.kind === "not_found") {
 		return Response.json(
 			{ error: `File not found: ${result.input}` },
 			{ status: 404 },
@@ -322,8 +358,8 @@ export async function handleDoc(req: Request, options: HandleDocOptions = {}): P
 	}
 
 	try {
-		const markdown = await Bun.file(result.path).text();
-		return docJson({ markdown, filepath: result.path, renderAs: "markdown" }, options);
+		const snapshot = readSourceFileSnapshot(result.path);
+		return docJson({ markdown: snapshot.text, filepath: result.path, renderAs: "markdown" }, options, snapshot);
 	} catch {
 		return Response.json({ error: "Failed to read file" }, { status: 500 });
 	}

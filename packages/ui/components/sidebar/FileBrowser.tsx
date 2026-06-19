@@ -11,6 +11,7 @@ import type { DirState } from "../../hooks/useFileBrowser";
 import { CountBadge } from "./CountBadge";
 import { ObsidianIconRaw } from "../icons/ObsidianIcons";
 import type { WorkspaceFileChange, WorkspaceStatusPayload } from "@plannotator/shared/workspace-status";
+import { normalizeBrowserPath } from "@plannotator/shared/browser-paths";
 
 interface FileBrowserProps {
   dirs: DirState[];
@@ -28,8 +29,11 @@ interface FileBrowserProps {
 }
 
 export interface FileEditStatus {
-  status: "clean" | "dirty" | "saving" | "saved" | "conflict" | "error";
+  key?: string;
+  path?: string;
+  status: "clean" | "dirty" | "saving" | "saved" | "conflict" | "error" | "missing";
   dirty: boolean;
+  conflict?: boolean;
 }
 
 interface AggregateWorkspaceChange {
@@ -39,9 +43,71 @@ interface AggregateWorkspaceChange {
 }
 
 export function normalizePathForLookup(path: string): string {
-  const normalized = path.replace(/\\/g, "/");
-  const prefix = normalized.startsWith("//") ? "//" : "";
-  return prefix + normalized.slice(prefix.length).replace(/\/+/g, "/").replace(/\/+$/, "");
+  return normalizeBrowserPath(path);
+}
+
+function joinLookupPath(rootPath: string, relativePath: string): string {
+  const root = normalizePathForLookup(rootPath);
+  const relative = normalizePathForLookup(relativePath).replace(/^\/+/, "");
+  if (!relative || relative === ".") return root;
+  if (root === "/" || /^[A-Za-z]:\/$/.test(root)) return normalizePathForLookup(`${root}${relative}`);
+  return normalizePathForLookup(`${root}/${relative}`);
+}
+
+export function getPathLookupCandidates(
+  absolutePath: string,
+  relativePath?: string,
+  workspaceStatus?: WorkspaceStatusPayload,
+): string[] {
+  const candidates = [absolutePath, normalizePathForLookup(absolutePath)];
+  if (relativePath && workspaceStatus?.rootPath) {
+    candidates.push(joinLookupPath(workspaceStatus.rootPath, relativePath));
+  }
+  const seen = new Set<string>();
+  return candidates.filter((path) => {
+    const normalized = normalizePathForLookup(path);
+    if (seen.has(normalized)) return false;
+    seen.add(normalized);
+    return true;
+  });
+}
+
+function getPathMapValue<T>(map: Map<string, T> | undefined, paths: string | string[]): T | undefined {
+  if (!map) return undefined;
+  const candidates = Array.isArray(paths) ? paths : [paths];
+  const normalizedCandidates = candidates.map(normalizePathForLookup);
+  for (let index = 0; index < candidates.length; index += 1) {
+    const path = candidates[index];
+    const normalized = normalizedCandidates[index];
+    if (map.has(path)) return map.get(path);
+    if (map.has(normalized)) return map.get(normalized);
+  }
+  for (const [path, value] of map.entries()) {
+    if (normalizedCandidates.includes(normalizePathForLookup(path))) return value;
+  }
+  return undefined;
+}
+
+function pathSetHas(paths: Set<string> | undefined, candidates: string | string[]): boolean {
+  if (!paths) return false;
+  const candidatePaths = Array.isArray(candidates) ? candidates : [candidates];
+  const normalizedCandidates = candidatePaths.map(normalizePathForLookup);
+  for (let index = 0; index < candidatePaths.length; index += 1) {
+    if (paths.has(candidatePaths[index]) || paths.has(normalizedCandidates[index])) return true;
+  }
+  for (const path of paths) {
+    if (normalizedCandidates.includes(normalizePathForLookup(path))) return true;
+  }
+  return false;
+}
+
+export function getFileEditStatus(
+  absolutePath: string,
+  editStatuses?: Map<string, FileEditStatus>,
+  relativePath?: string,
+  workspaceStatus?: WorkspaceStatusPayload,
+): FileEditStatus | undefined {
+  return getPathMapValue(editStatuses, getPathLookupCandidates(absolutePath, relativePath, workspaceStatus));
 }
 
 function normalizeWorkspaceStatus(
@@ -69,31 +135,43 @@ function normalizeWorkspaceStatus(
 function getAggregateCount(
   node: VaultNode,
   dirPath: string,
-  counts: Map<string, number>
+  counts: Map<string, number>,
+  workspaceStatus?: WorkspaceStatusPayload,
 ): number {
   if (node.type === "file") {
-    return counts.get(`${dirPath}/${node.path}`) ?? 0;
+    return getPathMapValue(counts, getPathLookupCandidates(`${dirPath}/${node.path}`, node.path, workspaceStatus)) ?? 0;
   }
   let total = 0;
   for (const child of node.children ?? []) {
-    total += getAggregateCount(child, dirPath, counts);
+    total += getAggregateCount(child, dirPath, counts, workspaceStatus);
   }
   return total;
 }
 
 export function getWorkspaceChange(
   absolutePath: string,
-  workspaceStatus?: WorkspaceStatusPayload
+  workspaceStatus?: WorkspaceStatusPayload,
+  relativePath?: string,
 ): WorkspaceFileChange | undefined {
   const files = workspaceStatus?.files;
   if (!files) return undefined;
-  const normalizedPath = normalizePathForLookup(absolutePath);
-  const direct = files[absolutePath] ?? files[normalizedPath];
-  if (direct) return direct;
+  const candidates = getPathLookupCandidates(absolutePath, relativePath, workspaceStatus);
+  const normalizedCandidates = candidates.map(normalizePathForLookup);
+  for (let index = 0; index < candidates.length; index += 1) {
+    const direct = files[candidates[index]] ?? files[normalizedCandidates[index]];
+    if (direct) return direct;
+  }
   for (const [path, change] of Object.entries(files)) {
-    if (normalizePathForLookup(path) === normalizedPath) return change;
+    if (normalizedCandidates.includes(normalizePathForLookup(path))) return change;
   }
   return undefined;
+}
+
+export function isFileTreeSelectionDisabled(
+  workspaceChange: WorkspaceFileChange | undefined,
+  editStatus: FileEditStatus | undefined,
+): boolean {
+  return workspaceChange?.status === "deleted" && editStatus?.status !== "missing";
 }
 
 export function getAggregateWorkspaceChange(
@@ -102,7 +180,7 @@ export function getAggregateWorkspaceChange(
   workspaceStatus?: WorkspaceStatusPayload
 ): AggregateWorkspaceChange {
   if (node.type === "file") {
-    const change = getWorkspaceChange(`${dirPath}/${node.path}`, workspaceStatus);
+    const change = getWorkspaceChange(`${dirPath}/${node.path}`, workspaceStatus, node.path);
     return change
       ? { additions: change.additions, deletions: change.deletions, files: 1 }
       : { additions: 0, deletions: 0, files: 0 };
@@ -137,7 +215,7 @@ const TreeNode: React.FC<{
   const paddingLeft = 8 + depth * 14;
 
   if (node.type === "folder") {
-    const aggregateCount = annotationCounts ? getAggregateCount(node, dirPath, annotationCounts) : 0;
+    const aggregateCount = annotationCounts ? getAggregateCount(node, dirPath, annotationCounts, workspaceStatus) : 0;
     const aggregateChange = getAggregateWorkspaceChange(node, dirPath, workspaceStatus);
     return (
       <>
@@ -190,14 +268,18 @@ const TreeNode: React.FC<{
   }
 
   const displayName = node.name.replace(/\.(mdx?|txt|html?)$/i, "");
-  const fileCount = annotationCounts?.get(absolutePath) ?? 0;
-  const isHighlighted = highlightedFiles?.has(absolutePath);
-  const editStatus = editStatuses?.get(absolutePath);
-  const workspaceChange = getWorkspaceChange(absolutePath, workspaceStatus);
+  const lookupCandidates = getPathLookupCandidates(absolutePath, node.path, workspaceStatus);
+  const fileCount = getPathMapValue(annotationCounts, lookupCandidates) ?? 0;
+  const isHighlighted = pathSetHas(highlightedFiles, lookupCandidates);
+  const editStatus = getFileEditStatus(absolutePath, editStatuses, node.path, workspaceStatus);
+  const workspaceChange = getWorkspaceChange(absolutePath, workspaceStatus, node.path);
   const isDeleted = workspaceChange?.status === "deleted";
+  const isSelectionDisabled = isFileTreeSelectionDisabled(workspaceChange, editStatus);
   const editMarker =
     editStatus?.status === "conflict" || editStatus?.status === "error"
       ? { label: "!", className: "bg-destructive/15 text-destructive", title: editStatus.status === "conflict" ? "Save conflict" : "Save failed" }
+      : editStatus?.status === "missing"
+        ? { label: "!", className: "bg-warning/15 text-warning-foreground", title: "File missing on disk" }
       : editStatus?.status === "saving"
         ? { label: "...", className: "bg-primary/10 text-primary", title: "Saving" }
         : editStatus?.dirty
@@ -219,12 +301,12 @@ const TreeNode: React.FC<{
   return (
     <button
       onClick={() => {
-        if (!isDeleted) onSelectFile(absolutePath, dirPath);
+        if (!isSelectionDisabled) onSelectFile(absolutePath, dirPath);
       }}
-      disabled={isDeleted}
-      className={`file-tree-item w-full text-left group ${isActive ? "active" : ""} ${fileCount > 0 ? "has-annotations" : ""} ${isHighlighted ? 'file-annotation-flash' : ''} ${isDeleted ? 'opacity-70 cursor-default' : ''}`}
+      disabled={isSelectionDisabled}
+      className={`file-tree-item w-full text-left group ${isActive ? "active" : ""} ${fileCount > 0 ? "has-annotations" : ""} ${isHighlighted ? 'file-annotation-flash' : ''} ${isSelectionDisabled ? 'opacity-70 cursor-default' : ''}`}
       style={{ paddingLeft: paddingLeft + 15 }}
-      title={isDeleted ? `${node.path} (deleted on disk)` : node.path}
+      title={isDeleted ? `${node.path} (${editStatus?.status === "missing" ? "missing on disk" : "deleted on disk"})` : node.path}
     >
       <svg className="w-3 h-3 flex-shrink-0 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />

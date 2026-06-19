@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { VaultNode } from "../../types";
-import type { WorkspaceStatusPayload } from "@plannotator/shared/workspace-status";
-import { getAggregateWorkspaceChange, getWorkspaceChange, normalizePathForLookup } from "./FileBrowser";
+import type { WorkspaceFileChange, WorkspaceStatusPayload } from "@plannotator/shared/workspace-status";
+import { getAggregateWorkspaceChange, getFileEditStatus, getWorkspaceChange, isFileTreeSelectionDisabled, normalizePathForLookup } from "./FileBrowser";
 
 describe("FileBrowser workspace status lookup", () => {
   test("matches Windows status keys when the UI path uses mixed separators", () => {
@@ -69,6 +69,93 @@ describe("FileBrowser workspace status lookup", () => {
     expect(getAggregateWorkspaceChange(node, "/repo/docs/", status)).toEqual({
       additions: 4,
       deletions: 2,
+      files: 1,
+    });
+  });
+
+  test("allows selecting a deleted file when Plannotator still has a missing-file buffer", () => {
+    const deleted: WorkspaceFileChange = {
+      path: "/repo/docs/plan.md",
+      repoRelativePath: "docs/plan.md",
+      status: "deleted",
+      additions: 0,
+      deletions: 3,
+      staged: false,
+      unstaged: true,
+    };
+
+    expect(isFileTreeSelectionDisabled(deleted, undefined)).toBe(true);
+    expect(isFileTreeSelectionDisabled(deleted, { status: "dirty", dirty: true })).toBe(true);
+    expect(isFileTreeSelectionDisabled(deleted, { status: "missing", dirty: false })).toBe(false);
+    expect(isFileTreeSelectionDisabled({ ...deleted, status: "modified" }, undefined)).toBe(false);
+  });
+
+  test("matches edit statuses when the UI path uses mixed separators or doubled slashes", () => {
+    const statuses = new Map([
+      ["C:\\repo\\docs\\plan.md", { status: "missing" as const, dirty: false }],
+      ["/repo/docs/other.md", { status: "dirty" as const, dirty: true }],
+    ]);
+
+    expect(getFileEditStatus("C:\\repo\\docs/plan.md", statuses)?.status).toBe("missing");
+    expect(getFileEditStatus("/repo/docs//other.md", statuses)?.status).toBe("dirty");
+  });
+
+  test("keeps a deleted file selectable when the missing edit status needs path normalization", () => {
+    const deleted: WorkspaceFileChange = {
+      path: "C:\\repo\\docs\\plan.md",
+      repoRelativePath: "docs/plan.md",
+      status: "deleted",
+      additions: 0,
+      deletions: 3,
+      staged: false,
+      unstaged: true,
+    };
+    const statuses = new Map([
+      ["C:\\repo\\docs\\plan.md", { status: "missing" as const, dirty: false }],
+    ]);
+    const editStatus = getFileEditStatus("C:\\repo\\docs/plan.md", statuses);
+
+    expect(editStatus?.status).toBe("missing");
+    expect(isFileTreeSelectionDisabled(deleted, editStatus)).toBe(false);
+  });
+
+  test("matches deleted-file status through a symlinked folder root alias", () => {
+    const status: WorkspaceStatusPayload = {
+      available: true,
+      rootPath: "/real/docs",
+      repoRoot: "/real",
+      files: {
+        "/real/docs/plan.md": {
+          path: "/real/docs/plan.md",
+          repoRelativePath: "docs/plan.md",
+          status: "deleted",
+          additions: 0,
+          deletions: 5,
+          staged: false,
+          unstaged: true,
+        },
+      },
+      totals: { files: 1, additions: 0, deletions: 5 },
+    };
+    const editStatuses = new Map([
+      ["/real/docs/plan.md", { status: "missing" as const, dirty: false }],
+    ]);
+    const node: VaultNode = {
+      name: "docs",
+      path: ".",
+      type: "folder",
+      children: [{ name: "plan.md", path: "plan.md", type: "file" }],
+    };
+
+    const workspaceChange = getWorkspaceChange("/link/docs/plan.md", status, "plan.md");
+    const editStatus = getFileEditStatus("/link/docs/plan.md", editStatuses, "plan.md", status);
+
+    expect(workspaceChange?.status).toBe("deleted");
+    expect(editStatus?.status).toBe("missing");
+    expect(isFileTreeSelectionDisabled(workspaceChange, editStatus)).toBe(false);
+    expect(getAggregateWorkspaceChange(node, "/link/docs", status)).toEqual({
+      additions: 0,
+      deletions: 5,
       files: 1,
     });
   });
