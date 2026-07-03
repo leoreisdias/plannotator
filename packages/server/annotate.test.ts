@@ -86,6 +86,107 @@ describe("annotate server: /api/save-notes wiring", () => {
   });
 });
 
+describe("annotate server: visual PFM packet metadata", () => {
+  let savedPort: string | undefined;
+  let savedRemote: string | undefined;
+
+  beforeEach(() => {
+    savedPort = process.env.PLANNOTATOR_PORT;
+    savedRemote = process.env.PLANNOTATOR_REMOTE;
+    delete process.env.PLANNOTATOR_PORT;
+    process.env.PLANNOTATOR_REMOTE = "0";
+  });
+
+  afterEach(() => {
+    if (savedPort === undefined) delete process.env.PLANNOTATOR_PORT;
+    else process.env.PLANNOTATOR_PORT = savedPort;
+    if (savedRemote === undefined) delete process.env.PLANNOTATOR_REMOTE;
+    else process.env.PLANNOTATOR_REMOTE = savedRemote;
+  });
+
+  test("marks a single-file annotate gate visual packet without changing annotate mode", async () => {
+    const server = await startAnnotateServer({
+      markdown: "---\npfm: visual-plan\n---\n\n# Plan\n",
+      filePath: join(tmpdir(), "visual-plan.md"),
+      htmlContent: MINIMAL_HTML,
+      gate: true,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/plan`);
+      const plan = await response.json() as {
+        mode?: string;
+        gate?: boolean;
+        pfmPacket?: { kind?: string; visual?: boolean; detectedBy?: string };
+      };
+
+      expect(plan.mode).toBe("annotate");
+      expect(plan.gate).toBe(true);
+      expect(plan.pfmPacket).toEqual({
+        kind: "visual-plan",
+        visual: true,
+        detectedBy: "frontmatter",
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("does not mark ordinary markdown as a visual packet", async () => {
+    const server = await startAnnotateServer({
+      markdown: "# Plain\n\nJust markdown.\n",
+      filePath: join(tmpdir(), "plain.md"),
+      htmlContent: MINIMAL_HTML,
+      gate: true,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/plan`);
+      const plan = await response.json() as { pfmPacket?: unknown };
+
+      expect(plan.pfmPacket).toBeUndefined();
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("keeps folder annotate on the file browser flow while marking opened packet files", async () => {
+    const folderPath = mkdtempSync(join(tmpdir(), "plannotator-visual-packet-folder-"));
+    const planPath = join(folderPath, "plan.md");
+    writeFileSync(planPath, "---\npfm: visual-plan\n---\n\n# Plan\n", "utf-8");
+
+    const server = await startAnnotateServer({
+      markdown: "",
+      filePath: folderPath,
+      folderPath,
+      mode: "annotate-folder",
+      htmlContent: MINIMAL_HTML,
+      gate: true,
+    });
+
+    try {
+      const planResponse = await fetch(`${server.url}/api/plan`);
+      const plan = await planResponse.json() as { mode?: string; pfmPacket?: unknown };
+      expect(plan.mode).toBe("annotate-folder");
+      expect(plan.pfmPacket).toBeUndefined();
+
+      const docResponse = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(planPath)}`);
+      const doc = await docResponse.json() as {
+        markdown?: string;
+        pfmPacket?: { kind?: string; visual?: boolean; detectedBy?: string };
+      };
+      expect(doc.markdown).toContain("# Plan");
+      expect(doc.pfmPacket).toEqual({
+        kind: "visual-plan",
+        visual: true,
+        detectedBy: "frontmatter",
+      });
+    } finally {
+      server.stop();
+    }
+  });
+});
+
 describe("annotate server: /api/share-html symlink containment", () => {
   let savedPort: string | undefined;
   let savedRemote: string | undefined;

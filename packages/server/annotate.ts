@@ -41,6 +41,7 @@ import type { AIEndpoints } from "@plannotator/ai";
 import { createHtmlAssetRegistry } from "./html-assets";
 import { createBunAgentTerminalBridge } from "./agent-terminal";
 import { isAgentTerminalWsRoute, supportsAnnotateAgentTerminalMode } from "@plannotator/shared/agent-terminal";
+import { detectPfmPacket } from "@plannotator/shared/pfm-packet";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -321,6 +322,7 @@ export async function startAnnotateServer(
           if (url.pathname === "/api/plan" && req.method === "GET") {
             const displayRawHtml = renderHtml && rawHtml ? htmlAssets.rewriteHtml(rawHtml, filePath) : undefined;
             const primarySource = getPrimarySource();
+            const pfmPacket = displayRawHtml ? null : detectPfmPacket(primarySource.plan);
             return Response.json({
               plan: primarySource.plan,
               origin,
@@ -341,6 +343,7 @@ export async function startAnnotateServer(
               isWSL: wslFlag,
               serverConfig: getServerConfig(gitUser),
               agentTerminal: agentTerminal.capability,
+              ...(pfmPacket ? { pfmPacket } : {}),
               ...(recentMessages ? { recentMessages } : {}),
             });
           }

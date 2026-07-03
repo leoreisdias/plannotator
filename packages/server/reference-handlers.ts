@@ -28,6 +28,7 @@ import {
 } from "@plannotator/shared/resolve-file";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { disabledSourceSave, type SourceFileSnapshot, type SourceSaveCapability } from "@plannotator/shared/source-save";
+import { detectPfmPacket } from "@plannotator/shared/pfm-packet";
 import {
 	createSourceSaveCapability,
 	createSourceSaveCapabilityFromSnapshot,
@@ -190,7 +191,10 @@ function applyDocOptions<T extends Record<string, unknown>>(
 }
 
 function docJson(data: Record<string, unknown>, options?: HandleDocOptions, sourceSnapshot?: SourceFileSnapshot): Response {
-	return Response.json(applyDocOptions(data, options, sourceSnapshot));
+	const packet = typeof data.markdown === "string" && data.renderAs === "markdown"
+		? detectPfmPacket(data.markdown)
+		: null;
+	return Response.json(applyDocOptions(packet ? { ...data, pfmPacket: packet } : data, options, sourceSnapshot));
 }
 
 /** Serve a linked markdown document. Resolves absolute, relative, or bare filename paths. */
