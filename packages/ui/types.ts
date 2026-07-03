@@ -39,6 +39,7 @@ export interface Annotation {
   images?: ImageAttachment[]; // Attached images with human-readable names
   isQuickLabel?: boolean; // true if created via quick label chip
   quickLabelTip?: string; // optional instruction tip from the label definition
+  checkboxOverrideId?: string; // for checkbox annotations whose visual override id differs from blockId
   diffContext?: 'added' | 'removed' | 'modified'; // set when annotation created in plan diff view
   mathTargets?: Array<{
     blockId: string;

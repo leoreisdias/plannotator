@@ -2936,7 +2936,7 @@ const App: React.FC = () => {
     // If this is a checkbox annotation, revert the visual override
     if (id.startsWith('ann-checkbox-')) {
       if (ann) {
-        checkbox.revertOverride(ann.blockId);
+        checkbox.revertOverride(ann.checkboxOverrideId ?? ann.blockId);
       }
     }
     removeAnnotation(id);
