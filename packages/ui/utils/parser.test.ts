@@ -756,6 +756,24 @@ describe("parseMarkdownToBlocks — directive containers", () => {
     expect(blocks[0].content).toBe("Body line.");
   });
 
+  test("captures body between ::kind and ::", () => {
+    const md = "::file-map\n- [A] packages/shared/pfm-packet.ts - packet detection\n::";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("directive");
+    expect(blocks[0].directiveKind).toBe("file-map");
+    expect(blocks[0].content).toBe("- [A] packages/shared/pfm-packet.ts - packet detection");
+  });
+
+  test("keeps directive opening metadata with the directive body", () => {
+    const md = "::diagram mermaid\nflowchart LR\n  A --> B\n::";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("directive");
+    expect(blocks[0].directiveKind).toBe("diagram");
+    expect(blocks[0].content).toBe("mermaid\nflowchart LR\n  A --> B");
+  });
+
   test("supports arbitrary kinds (info, success, danger)", () => {
     for (const kind of ["info", "success", "danger", "warning"]) {
       const blocks = parseMarkdownToBlocks(`:::${kind}\nbody\n:::`);

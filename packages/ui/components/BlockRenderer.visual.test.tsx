@@ -17,6 +17,25 @@ function renderDirective(kind: string, body: string): string {
 	return renderToStaticMarkup(<BlockRenderer block={block} />);
 }
 
+function renderDirectiveWithOptions(
+	kind: string,
+	body: string,
+	options: {
+		onToggleCheckbox?: (blockId: string, checked: boolean) => void;
+		checkboxOverrides?: Map<string, boolean>;
+	} = {},
+): string {
+	const block: Block = {
+		id: `block-${kind}`,
+		type: "directive",
+		directiveKind: kind,
+		content: body,
+		order: 1,
+		startLine: 1,
+	};
+	return renderToStaticMarkup(<BlockRenderer block={block} {...options} />);
+}
+
 describe("BlockRenderer visual PFM directives", () => {
 	test("renders every visual block vocabulary item as a native visual block", () => {
 		const samples: Record<string, string> = {
@@ -46,6 +65,34 @@ describe("BlockRenderer visual PFM directives", () => {
 		expect(html).toContain("Detect visual packets");
 		expect(html).toContain("A");
 		expect(html).toContain("M");
+	});
+
+	test("renders visual checklists as toggleable checkbox rows", () => {
+		const overrides = new Map([["block-checklist:checklist:1", true]]);
+		const html = renderDirectiveWithOptions(
+			"checklist",
+			"- [x] Detection\n- [ ] Rendering",
+			{ onToggleCheckbox: () => {}, checkboxOverrides: overrides },
+		);
+
+		expect(html).toContain('role="checkbox"');
+		expect(html).toContain('aria-checked="true"');
+		expect(html).toContain("<button");
+		expect(html).toContain("Rendering");
+	});
+
+	test("renders annotated diff lines with light-mode contrast classes", () => {
+		const html = renderDirective(
+			"annotated-diff",
+			"+ Added detector\n- Removed broad fallback\n@@ context",
+		);
+
+		expect(html).toContain("text-emerald-300");
+		expect(html).toContain("[.light_&amp;]:text-emerald-800");
+		expect(html).toContain("text-red-300");
+		expect(html).toContain("[.light_&amp;]:text-red-800");
+		expect(html).toContain("text-sky-300");
+		expect(html).toContain("[.light_&amp;]:text-sky-800");
 	});
 
 	test("keeps unknown directives on the existing generic callout path", () => {

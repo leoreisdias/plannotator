@@ -29,6 +29,8 @@ interface VisualDirectiveBlockProps {
   onOpenCodeFile?: (path: string) => void;
   imageBaseDir?: string;
   onImageClick?: (src: string, alt: string) => void;
+  onToggleCheckbox?: (blockId: string, checked: boolean) => void;
+  checkboxOverrides?: Map<string, boolean>;
   githubRepo?: string;
   onNavigateAnchor?: (hash: string) => void;
 }
@@ -49,6 +51,8 @@ export const VisualDirectiveBlock: React.FC<VisualDirectiveBlockProps> = ({
   onOpenCodeFile,
   imageBaseDir,
   onImageClick,
+  onToggleCheckbox,
+  checkboxOverrides,
   githubRepo,
   onNavigateAnchor,
 }) => {
@@ -83,6 +87,8 @@ export const VisualDirectiveBlock: React.FC<VisualDirectiveBlockProps> = ({
           onImageClick,
           onOpenLinkedDoc,
           onOpenCodeFile,
+          onToggleCheckbox,
+          checkboxOverrides,
           githubRepo,
           onNavigateAnchor,
         })}
@@ -95,13 +101,24 @@ function renderVisualBody(
   kind: string,
   block: Block,
   inline: (text: string) => React.ReactNode,
-  proseOptions: Omit<Parameters<typeof renderProseBody>[0], 'body'>,
+  options: Omit<Parameters<typeof renderProseBody>[0], 'body'> & {
+    onToggleCheckbox?: (blockId: string, checked: boolean) => void;
+    checkboxOverrides?: Map<string, boolean>;
+  },
 ): React.ReactNode {
   switch (kind) {
     case 'file-map':
       return <FileMap body={block.content} inline={inline} />;
     case 'checklist':
-      return <Checklist body={block.content} inline={inline} />;
+      return (
+        <Checklist
+          blockId={block.id}
+          body={block.content}
+          inline={inline}
+          onToggleCheckbox={options.onToggleCheckbox}
+          checkboxOverrides={options.checkboxOverrides}
+        />
+      );
     case 'open-questions':
       return <OpenQuestions body={block.content} inline={inline} />;
     case 'diagram':
@@ -116,7 +133,7 @@ function renderVisualBody(
         body: block.content,
         paragraphClassName: 'text-[15px] leading-relaxed text-foreground/90',
         listClassName: 'text-[15px] leading-relaxed text-foreground/90',
-        ...proseOptions,
+        ...options,
       });
   }
 }
@@ -148,26 +165,75 @@ const FileMap: React.FC<{ body: string; inline: (text: string) => React.ReactNod
   );
 };
 
-const Checklist: React.FC<{ body: string; inline: (text: string) => React.ReactNode }> = ({ body, inline }) => {
+const Checklist: React.FC<{
+  blockId: string;
+  body: string;
+  inline: (text: string) => React.ReactNode;
+  onToggleCheckbox?: (blockId: string, checked: boolean) => void;
+  checkboxOverrides?: Map<string, boolean>;
+}> = ({ blockId, body, inline, onToggleCheckbox, checkboxOverrides }) => {
   const items = parseChecklist(body);
-  const done = items.filter((item) => item.checked).length;
+  const viewItems = items.map((item, index) => {
+    const itemId = `${blockId}:checklist:${index}`;
+    const checked = checkboxOverrides?.has(itemId) ? checkboxOverrides.get(itemId) === true : item.checked;
+    return { ...item, id: itemId, checked };
+  });
+  const done = viewItems.filter((item) => item.checked).length;
   return (
     <div className="space-y-3">
       <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-        <div className="h-full bg-emerald-500" style={{ width: `${items.length ? (done / items.length) * 100 : 0}%` }} />
+        <div className="h-full bg-emerald-500" style={{ width: `${viewItems.length ? (done / viewItems.length) * 100 : 0}%` }} />
       </div>
       <div className="space-y-1.5">
-        {items.map((item, index) => (
-          <div key={index} className="flex items-start gap-2 rounded-md bg-background/35 px-3 py-2">
-            <span className={`mt-0.5 flex h-4 w-4 items-center justify-center rounded border text-[10px] ${item.checked ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-border text-transparent'}`}>
-              ✓
-            </span>
-            <div className={`text-sm leading-5 ${item.checked ? 'text-muted-foreground line-through' : 'text-foreground/90'}`}>
-              {inline(item.text)}
-            </div>
-          </div>
+        {viewItems.map((item) => (
+          <ChecklistRow
+            key={item.id}
+            item={item}
+            inline={inline}
+            onToggleCheckbox={onToggleCheckbox}
+          />
         ))}
       </div>
+    </div>
+  );
+};
+
+const ChecklistRow: React.FC<{
+  item: { id: string; checked: boolean; text: string };
+  inline: (text: string) => React.ReactNode;
+  onToggleCheckbox?: (blockId: string, checked: boolean) => void;
+}> = ({ item, inline, onToggleCheckbox }) => {
+  const markerClass = item.checked
+    ? 'border-emerald-600 bg-emerald-600 text-white dark:border-emerald-500 dark:bg-emerald-500'
+    : 'border-border text-transparent';
+  const textClass = item.checked ? 'text-muted-foreground line-through' : 'text-foreground/90';
+  const rowClass = 'flex w-full items-start gap-2 rounded-md bg-background/35 px-3 py-2 text-left';
+  const marker = (
+    <span className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border text-[10px] ${markerClass}`}>
+      ✓
+    </span>
+  );
+  const label = <span className={`text-sm leading-5 ${textClass}`}>{inline(item.text)}</span>;
+
+  if (onToggleCheckbox) {
+    return (
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={item.checked}
+        className={`${rowClass} transition-colors hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
+        onClick={() => onToggleCheckbox(item.id, !item.checked)}
+      >
+        {marker}
+        {label}
+      </button>
+    );
+  }
+
+  return (
+    <div role="checkbox" aria-checked={item.checked} className={rowClass}>
+      {marker}
+      {label}
     </div>
   );
 };
@@ -315,8 +381,13 @@ function parseListItems(body: string): string[] {
 
 function normalizeDiagramSource(body: string): { language: 'mermaid' | 'dot'; source: string } {
   const fenced = body.trim().match(/^```([a-zA-Z0-9_-]+)?\n([\s\S]*?)\n```$/);
-  const language = fenced?.[1]?.toLowerCase();
-  const source = fenced?.[2] ?? body.trim();
+  const rawLanguage = fenced?.[1]?.toLowerCase();
+  const rawSource = fenced?.[2] ?? body.trim();
+  const lines = rawSource.split('\n');
+  const firstLine = lines[0]?.trim().toLowerCase();
+  const hasLeadingLanguage = firstLine === 'mermaid' || firstLine === 'dot' || firstLine === 'graphviz';
+  const language = rawLanguage ?? (hasLeadingLanguage ? firstLine : undefined);
+  const source = hasLeadingLanguage ? lines.slice(1).join('\n').trim() : rawSource;
   return { language: language === 'dot' || language === 'graphviz' ? 'dot' : 'mermaid', source };
 }
 
@@ -343,8 +414,8 @@ function statusClass(status: string): string {
 }
 
 function diffLineClass(line: string): string {
-  if (line.startsWith('+')) return 'bg-emerald-500/10 text-emerald-300';
-  if (line.startsWith('-')) return 'bg-red-500/10 text-red-300';
-  if (line.startsWith('@@')) return 'bg-sky-500/10 text-sky-300';
+  if (line.startsWith('+')) return 'bg-emerald-500/10 text-emerald-300 [.light_&]:bg-emerald-500/12 [.light_&]:text-emerald-800';
+  if (line.startsWith('-')) return 'bg-red-500/10 text-red-300 [.light_&]:bg-red-500/12 [.light_&]:text-red-800';
+  if (line.startsWith('@@')) return 'bg-sky-500/10 text-sky-300 [.light_&]:bg-sky-500/12 [.light_&]:text-sky-800';
   return 'text-muted-foreground';
 }

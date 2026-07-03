@@ -141,6 +141,8 @@ export const BlockRenderer: React.FC<{
             onOpenCodeFile={onOpenCodeFile}
             imageBaseDir={imageBaseDir}
             onImageClick={onImageClick}
+            onToggleCheckbox={onToggleCheckbox}
+            checkboxOverrides={checkboxOverrides}
             githubRepo={githubRepo}
             onNavigateAnchor={onNavigateAnchor}
           />

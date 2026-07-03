@@ -451,18 +451,19 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
     // CommonMark §4.6 Type 6 blank-line termination). For a line that starts
     // with a close tag, we fall back to blank-line termination. Content is
     // sanitized at render time, not here.
-    // Directive container: `:::kind` opens, `:::` closes. Inline kind is
-    // restricted to simple identifiers (letters, digits, hyphens). Body is
-    // accumulated verbatim and rendered with inline markdown.
-    const directiveOpen = trimmed.match(/^:::\s*([a-zA-Z][a-zA-Z0-9-]*)\s*$/);
+    // Directive container: `:::kind` / `::kind` opens and a matching bare
+    // fence closes. Inline kind is restricted to simple identifiers.
+    const directiveOpen = trimmed.match(/^(:::{1}|::)\s*([a-zA-Z][a-zA-Z0-9-]*)(?:\s+(.+?))?\s*$/);
     if (directiveOpen) {
       flush();
       const directiveStartLine = currentLineNum;
-      const kind = directiveOpen[1].toLowerCase();
-      const bodyLines: string[] = [];
+      const closingFence = directiveOpen[1];
+      const kind = directiveOpen[2].toLowerCase();
+      const directiveMeta = directiveOpen[3]?.trim();
+      const bodyLines: string[] = directiveMeta ? [directiveMeta] : [];
       while (i + 1 < lines.length) {
         i++;
-        if (lines[i].trim() === ':::') break;
+        if (lines[i].trim() === closingFence) break;
         bodyLines.push(lines[i]);
       }
       blocks.push({
