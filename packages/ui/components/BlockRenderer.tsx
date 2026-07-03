@@ -8,6 +8,7 @@ import { Callout } from "./blocks/Callout";
 import { AlertBlock } from "./blocks/AlertBlock";
 import { TableBlock } from "./blocks/TableBlock";
 import { MathBlock } from "./blocks/MathBlock";
+import { isVisualDirectiveKind, VisualDirectiveBlock } from "./blocks/VisualDirectiveBlock";
 
 export const BlockRenderer: React.FC<{
   block: Block;
@@ -132,6 +133,19 @@ export const BlockRenderer: React.FC<{
 
     case 'directive': {
       const kind = block.directiveKind || 'note';
+      if (isVisualDirectiveKind(kind)) {
+        return (
+          <VisualDirectiveBlock
+            block={block}
+            onOpenLinkedDoc={onOpenLinkedDoc}
+            onOpenCodeFile={onOpenCodeFile}
+            imageBaseDir={imageBaseDir}
+            onImageClick={onImageClick}
+            githubRepo={githubRepo}
+            onNavigateAnchor={onNavigateAnchor}
+          />
+        );
+      }
       return (
         <Callout
           blockId={block.id}
