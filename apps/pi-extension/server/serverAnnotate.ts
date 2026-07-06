@@ -56,6 +56,7 @@ import {
 	supportsAnnotateAgentTerminalMode,
 	type AgentTerminalCapability,
 } from "../generated/agent-terminal.js";
+import { detectPfmPacket } from "../generated/pfm-packet.js";
 
 export interface AnnotateServerResult {
 	port: number;
@@ -342,6 +343,7 @@ export async function startAnnotateServer(options: {
 				? htmlAssets.rewriteHtml(options.rawHtml, options.filePath)
 				: undefined;
 			const primarySource = getPrimarySource();
+			const pfmPacket = displayRawHtml ? null : detectPfmPacket(primarySource.plan);
 			json(res, {
 				plan: primarySource.plan,
 				origin: options.origin ?? "pi",
@@ -361,6 +363,7 @@ export async function startAnnotateServer(options: {
 				projectRoot: options.folderPath || process.cwd(),
 				serverConfig: getServerConfig(gitUser),
 				agentTerminal: agentTerminalCapability,
+				...(pfmPacket ? { pfmPacket } : {}),
 				...(options.recentMessages ? { recentMessages: options.recentMessages } : {}),
 			});
 		} else if (url.pathname === "/api/share-html" && req.method === "GET") {

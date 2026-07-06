@@ -462,7 +462,7 @@ foreach ($junk in @("core", "extra")) {
     }
 }
 
-# Extras (compound / setup-goal / visual-explainer) are no longer managed in
+# Extras (compound / setup-goal / visual-plan / visual-explainer) are no longer managed in
 # the Claude or shared-agent skill scopes. Remove previously default-installed
 # copies ONCE per machine — recorded in the migrations ledger under the
 # Plannotator data dir — because copies the user reinstalls via `npx skills
@@ -473,7 +473,7 @@ $agentsSkillsDir = "$env:USERPROFILE\.agents\skills"
 $migrationsDir = Join-Path $configDir "migrations"
 $extrasMigration = Join-Path $migrationsDir "2026-06-extras-default-install-removed"
 if (-not (Test-Path $extrasMigration)) {
-    foreach ($skill in @("plannotator-compound", "plannotator-setup-goal", "plannotator-visual-explainer")) {
+    foreach ($skill in @("plannotator-compound", "plannotator-setup-goal", "plannotator-visual-plan", "plannotator-visual-explainer")) {
         foreach ($scopeDir in @($claudeSkillsDir, $agentsSkillsDir)) {
             $extraSkillPath = Join-Path $scopeDir $skill
             if (Test-Path $extraSkillPath) {
@@ -493,7 +493,7 @@ if (-not (Test-Path $extrasMigration)) {
 # redirected/CI runs never prompt. Flags win over everything.
 $prefsFile = Join-Path $configDir "install-prefs"
 $coreSkillNames = @("plannotator-review", "plannotator-annotate", "plannotator-last")
-$extraSkillNames = @("plannotator-compound", "plannotator-setup-goal", "plannotator-visual-explainer")
+$extraSkillNames = @("plannotator-compound", "plannotator-setup-goal", "plannotator-visual-plan", "plannotator-visual-explainer")
 
 $savedExtras = ""
 $savedInvocable = ""
@@ -631,7 +631,7 @@ if ($runWizard) {
         $extrasChoice = if ($Extras) { "yes" } else { "no" }
     } else {
         $defaultExtras = if ($savedExtras) { $savedExtras } else { "no" }
-        $extrasChoice = Read-YesNo "Install the extra skills (compound planning, setup-goal, visual explainer)?" $defaultExtras
+        $extrasChoice = Read-YesNo "Install the extra skills (compound planning, setup-goal, visual plan, visual explainer)?" $defaultExtras
     }
     $invocableList = $coreSkillNames
     if ($extrasChoice -eq "yes") { $invocableList = $coreSkillNames + $extraSkillNames }
@@ -757,15 +757,16 @@ try {
                 Write-Host "Tag $latestTag predates the core/extra skill layout — skipping shared agent skill install"
             }
 
-            # Kiro: hand-maintained skills (origin baked in) + two extras.
+            # Kiro: hand-maintained skills (origin baked in) + shared extras.
             if ($kiroAvailable -and (Test-Path "apps\kiro-cli\skills")) {
                 $kiroSkillsDir = "$env:USERPROFILE\.kiro\skills"
                 New-Item -ItemType Directory -Force -Path $kiroSkillsDir | Out-Null
                 # Kiro-specific skills (origin baked in) come from apps/kiro-cli/skills.
                 Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-review" $kiroSkillsDir
                 Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-annotate" $kiroSkillsDir
-                # Two extras come from apps/skills/extra (not duplicated into apps/kiro-cli/skills).
+                # Shared extras come from apps/skills/extra (not duplicated into apps/kiro-cli/skills).
                 Copy-SkillIfPresent "apps\skills\extra\plannotator-setup-goal" $kiroSkillsDir
+                Copy-SkillIfPresent "apps\skills\extra\plannotator-visual-plan" $kiroSkillsDir
                 Copy-SkillIfPresent "apps\skills\extra\plannotator-visual-explainer" $kiroSkillsDir
                 # Plannotator custom agent — don't clobber a user's existing one.
                 $kiroAgentsDir = "$env:USERPROFILE\.kiro\agents"
@@ -851,7 +852,7 @@ if (Test-Path $staleOpencodeArchive) {
 # Codex no longer hosts core skills (they now live in ~/.agents/skills).
 # Core skills are removed only once their replacement exists; the stale
 # shared-agent extras were never Codex's and are removed unconditionally.
-foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-compound", "plannotator-setup-goal")) {
+foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-compound", "plannotator-setup-goal", "plannotator-visual-plan")) {
     $staleSkillPath = Join-Path $staleCodexSkillsDir $skill
     if (Test-Path $staleSkillPath) {
         $isCore = $skill -in @("plannotator-review", "plannotator-annotate", "plannotator-last")
@@ -1013,7 +1014,7 @@ Write-Host "The /plannotator-review, /plannotator-annotate, and /plannotator-las
 
 if ($extrasChoice -ne "yes") {
     Write-Host ""
-    Write-Host "Optional skills (compound planning, setup-goal, visual explainer):"
+    Write-Host "Optional skills (compound planning, setup-goal, visual plan, visual explainer):"
     Write-Host "  npx skills add backnotprop/plannotator/apps/skills/extra"
 }
 

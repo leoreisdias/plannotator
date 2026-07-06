@@ -48,6 +48,7 @@ Kiro-specific skills (run with `PLANNOTATOR_ORIGIN=kiro-cli`):
 Shared extra skills (installed from Plannotator's canonical `apps/skills/extra/` set, not duplicated):
 
 - `plannotator-setup-goal`
+- `plannotator-visual-plan`
 - `plannotator-visual-explainer`
 
 The shared skills show the default agent badge rather than "Kiro CLI" — origin is cosmetic for
@@ -64,6 +65,7 @@ commands, and its prompt spells out which skill to use for which task:
 | `plannotator-review` | Review the current code changes or a pull request |
 | `plannotator-annotate` | Annotate a markdown/HTML file, folder, or URL |
 | `plannotator-setup-goal` | Turn an idea into a structured goal package |
+| `plannotator-visual-plan` | Author a PFM visual plan packet and open it with annotate gate |
 | `plannotator-visual-explainer` | Generate a polished visual HTML explainer |
 
 Launch it:

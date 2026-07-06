@@ -577,8 +577,8 @@ export async function startAnnotateServer(
               resolveDecision({
                 feedback: body.feedback || "",
                 annotations: body.annotations || [],
-                selectedMessageId: body.selectedMessageId,
-                feedbackScope: body.feedbackScope,
+                selectedMessageId: typeof body.selectedMessageId === "string" ? body.selectedMessageId : undefined,
+                feedbackScope: body.feedbackScope === "messages" ? "messages" : body.feedbackScope === "message" ? "message" : undefined,
               });
 
               return Response.json({ ok: true });

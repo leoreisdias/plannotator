@@ -550,7 +550,7 @@ set "AGENTS_SKILLS_DIR=%USERPROFILE%\.agents\skills"
 set "MIGRATIONS_DIR=!_CONFIG_DIR!\migrations"
 set "EXTRAS_MIGRATION=!MIGRATIONS_DIR!\2026-06-extras-default-install-removed"
 if not exist "!EXTRAS_MIGRATION!" (
-    for %%S in (plannotator-compound plannotator-setup-goal plannotator-visual-explainer) do (
+    for %%S in (plannotator-compound plannotator-setup-goal plannotator-visual-plan plannotator-visual-explainer) do (
         if exist "!CLAUDE_SKILLS_DIR!\%%S" (
             rmdir /s /q "!CLAUDE_SKILLS_DIR!\%%S" >nul 2>&1
             echo Removed extra Plannotator skill from !CLAUDE_SKILLS_DIR!\%%S ^(reinstall via npx skills add^)
@@ -584,7 +584,7 @@ if exist "!PREFS_FILE!" (
 REM Extras already on disk? Then the extras question is moot — they still
 REM count toward the picker list, and we never launch the npx flow over them.
 set "EXTRAS_PRESENT=0"
-for %%S in (plannotator-compound plannotator-setup-goal plannotator-visual-explainer) do (
+for %%S in (plannotator-compound plannotator-setup-goal plannotator-visual-plan plannotator-visual-explainer) do (
     if exist "!CLAUDE_SKILLS_DIR!\%%S" set "EXTRAS_PRESENT=1"
     if exist "!AGENTS_SKILLS_DIR!\%%S" set "EXTRAS_PRESENT=1"
 )
@@ -724,10 +724,14 @@ if !ERRORLEVEL! equ 0 (
                 xcopy /s /i /y /q "apps\kiro-cli\skills\%%S" "!KIRO_SKILLS_DIR!\%%S\" >nul 2>&1
             )
         )
-        REM The two extras Kiro keeps receiving come from apps\skills\extra.
+        REM Shared extras Kiro receives come from apps\skills\extra.
         if exist "apps\skills\extra\plannotator-setup-goal" (
             if exist "!KIRO_SKILLS_DIR!\plannotator-setup-goal" rmdir /s /q "!KIRO_SKILLS_DIR!\plannotator-setup-goal" >nul 2>&1
             xcopy /s /i /y /q "apps\skills\extra\plannotator-setup-goal" "!KIRO_SKILLS_DIR!\plannotator-setup-goal\" >nul 2>&1
+        )
+        if exist "apps\skills\extra\plannotator-visual-plan" (
+            if exist "!KIRO_SKILLS_DIR!\plannotator-visual-plan" rmdir /s /q "!KIRO_SKILLS_DIR!\plannotator-visual-plan" >nul 2>&1
+            xcopy /s /i /y /q "apps\skills\extra\plannotator-visual-plan" "!KIRO_SKILLS_DIR!\plannotator-visual-plan\" >nul 2>&1
         )
         if exist "apps\skills\extra\plannotator-visual-explainer" (
             if exist "!KIRO_SKILLS_DIR!\plannotator-visual-explainer" rmdir /s /q "!KIRO_SKILLS_DIR!\plannotator-visual-explainer" >nul 2>&1
@@ -783,7 +787,7 @@ if exist "!OPENCODE_COMMANDS_DIR!\plannotator-archive.md" (
 REM Codex no longer hosts core skills (they live in %%USERPROFILE%%\.agents\skills).
 REM Core skills are removed only once their replacement exists; the stale
 REM shared-agent extras were never Codex's and are removed unconditionally.
-for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator-compound plannotator-setup-goal) do (
+for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator-compound plannotator-setup-goal plannotator-visual-plan) do (
     if exist "!STALE_CODEX_SKILLS_DIR!\%%S" (
         set "OK_REMOVE=1"
         if "%%S"=="plannotator-review" if not exist "!AGENTS_SKILLS_DIR!\%%S" set "OK_REMOVE=0"
@@ -929,7 +933,7 @@ echo.
 echo The /plannotator-review, /plannotator-annotate, and /plannotator-last skills are ready to use!
 if not "!EXTRAS_CHOICE!"=="yes" (
     echo.
-    echo Optional skills ^(compound planning, setup-goal, visual explainer^):
+    echo Optional skills ^(compound planning, setup-goal, visual plan, visual explainer^):
     echo   npx skills add backnotprop/plannotator/apps/skills/extra
 )
 
@@ -1107,7 +1111,7 @@ if "!EXTRAS_PRESENT!"=="1" (
     set "DEF_EXTRAS=no"
     if defined SAVED_EXTRAS set "DEF_EXTRAS=!SAVED_EXTRAS!"
     set "ANSWER="
-    set /p "ANSWER=Install the extra skills (compound planning, setup-goal, visual explainer)? [y/N] "
+    set /p "ANSWER=Install the extra skills (compound planning, setup-goal, visual plan, visual explainer)? [y/N] "
     set "EXTRAS_CHOICE=no"
     if /i "!ANSWER!"=="y" set "EXTRAS_CHOICE=yes"
     if /i "!ANSWER!"=="yes" set "EXTRAS_CHOICE=yes"
@@ -1132,10 +1136,11 @@ set "SKILL_1=plannotator-review"
 set "SKILL_2=plannotator-annotate"
 set "SKILL_3=plannotator-last"
 if "!EXTRAS_CHOICE!"=="yes" (
-    set "SKILL_COUNT=6"
+    set "SKILL_COUNT=7"
     set "SKILL_4=plannotator-compound"
     set "SKILL_5=plannotator-setup-goal"
-    set "SKILL_6=plannotator-visual-explainer"
+    set "SKILL_6=plannotator-visual-plan"
+    set "SKILL_7=plannotator-visual-explainer"
 )
 REM Preselect previously chosen skills. NOTE: no pipes here — each side of a
 REM cmd pipe runs in a child without delayed expansion, so !vars! would pass

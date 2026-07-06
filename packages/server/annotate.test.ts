@@ -21,6 +21,10 @@ import { join } from "path";
 import { startAnnotateServer } from "./annotate";
 
 const MINIMAL_HTML = "<html><body>Plannotator</body></html>";
+const VISUAL_PLAN_SKILL_EXAMPLE = join(
+  import.meta.dir,
+  "../../apps/skills/extra/plannotator-visual-plan/examples/visual-plan-packet.md",
+);
 
 describe("annotate server: /api/save-notes wiring", () => {
   // Bind a random local port regardless of env left behind by sibling suites.
@@ -132,6 +136,38 @@ describe("annotate server: visual PFM packet metadata", () => {
     }
   });
 
+  test("opens the visual plan skill example as an annotate gate visual packet", async () => {
+    const exampleMarkdown = readFileSync(VISUAL_PLAN_SKILL_EXAMPLE, "utf-8");
+    const server = await startAnnotateServer({
+      markdown: exampleMarkdown,
+      filePath: VISUAL_PLAN_SKILL_EXAMPLE,
+      htmlContent: MINIMAL_HTML,
+      gate: true,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/plan`);
+      const plan = await response.json() as {
+        plan?: string;
+        mode?: string;
+        gate?: boolean;
+        pfmPacket?: { kind?: string; visual?: boolean; detectedBy?: string };
+      };
+
+      expect(plan.mode).toBe("annotate");
+      expect(plan.gate).toBe(true);
+      expect(plan.plan).toContain("Annotate Gate Visual Plan Fixture");
+      expect(plan.plan).toContain("::file-map");
+      expect(plan.pfmPacket).toEqual({
+        kind: "visual-plan",
+        visual: true,
+        detectedBy: "frontmatter",
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
   test("does not mark ordinary markdown as a visual packet", async () => {
     const server = await startAnnotateServer({
       markdown: "# Plain\n\nJust markdown.\n",
@@ -180,6 +216,149 @@ describe("annotate server: visual PFM packet metadata", () => {
         kind: "visual-plan",
         visual: true,
         detectedBy: "frontmatter",
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("preserves approve decision semantics for visual annotate gates", async () => {
+    const server = await startAnnotateServer({
+      markdown: "---\npfm: visual-plan\n---\n\n# Plan\n",
+      filePath: join(tmpdir(), "visual-approve.md"),
+      htmlContent: MINIMAL_HTML,
+      gate: true,
+    });
+
+    try {
+      const decision = server.waitForDecision();
+      const response = await fetch(`${server.url}/api/approve`, { method: "POST" });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true });
+      expect(await decision).toEqual({
+        feedback: "",
+        annotations: [],
+        approved: true,
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("preserves feedback decision semantics for visual annotate gates", async () => {
+    const server = await startAnnotateServer({
+      markdown: "---\npfm: visual-plan\n---\n\n# Plan\n",
+      filePath: join(tmpdir(), "visual-feedback.md"),
+      htmlContent: MINIMAL_HTML,
+      gate: true,
+    });
+
+    try {
+      const decision = server.waitForDecision();
+      const response = await fetch(`${server.url}/api/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          feedback: "Revise scope.",
+          annotations: [{ id: "annotation-1" }],
+          selectedMessageId: "message-1",
+          feedbackScope: "message",
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true });
+      expect(await decision).toEqual({
+        feedback: "Revise scope.",
+        annotations: [{ id: "annotation-1" }],
+        selectedMessageId: "message-1",
+        feedbackScope: "message",
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("narrows optional message feedback fields for visual annotate gates", async () => {
+    const server = await startAnnotateServer({
+      markdown: "---\npfm: visual-plan\n---\n\n# Plan\n",
+      filePath: join(tmpdir(), "visual-feedback-invalid-message-fields.md"),
+      htmlContent: MINIMAL_HTML,
+      gate: true,
+    });
+
+    try {
+      const decision = server.waitForDecision();
+      const response = await fetch(`${server.url}/api/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          feedback: "Revise scope.",
+          annotations: [],
+          selectedMessageId: 123,
+          feedbackScope: "everything",
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(await decision).toEqual({
+        feedback: "Revise scope.",
+        annotations: [],
+        selectedMessageId: undefined,
+        feedbackScope: undefined,
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("preserves close decision semantics for visual annotate gates", async () => {
+    const server = await startAnnotateServer({
+      markdown: "---\npfm: visual-plan\n---\n\n# Plan\n",
+      filePath: join(tmpdir(), "visual-close.md"),
+      htmlContent: MINIMAL_HTML,
+      gate: true,
+    });
+
+    try {
+      const decision = server.waitForDecision();
+      const response = await fetch(`${server.url}/api/exit`, { method: "POST" });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true });
+      expect(await decision).toEqual({
+        feedback: "",
+        annotations: [],
+        exit: true,
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("keeps annotate-last terminal rules separate from visual packet detection", async () => {
+    const server = await startAnnotateServer({
+      markdown: "---\npfm: visual-plan\n---\n\n# Plan\n",
+      filePath: "last-message",
+      mode: "annotate-last",
+      htmlContent: MINIMAL_HTML,
+      gate: true,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/plan`);
+      const plan = await response.json() as {
+        mode?: string;
+        pfmPacket?: { kind?: string };
+        agentTerminal?: { enabled?: boolean; reason?: string };
+      };
+
+      expect(plan.mode).toBe("annotate-last");
+      expect(plan.pfmPacket?.kind).toBe("visual-plan");
+      expect(plan.agentTerminal).toEqual({
+        enabled: false,
+        reason: "not-annotate-mode",
       });
     } finally {
       server.stop();
@@ -287,6 +466,50 @@ describe("annotate server: source save", () => {
 
       expect(response.status).toBe(200);
       expect(readFileSync(sourcePath, "utf-8")).toBe("After\r\n");
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("keeps source save enabled for visual packet markdown files", async () => {
+    const docDir = mkdtempSync(join(tmpdir(), "plannotator-visual-source-save-"));
+    const sourcePath = join(docDir, "visual-plan.md");
+    writeFileSync(sourcePath, "---\npfm: visual-plan\n---\n\n# Before\n", "utf-8");
+
+    const server = await startAnnotateServer({
+      markdown: "---\npfm: visual-plan\n---\n\n# Before\n",
+      filePath: sourcePath,
+      htmlContent: MINIMAL_HTML,
+      gate: true,
+    });
+
+    try {
+      const planResponse = await fetch(`${server.url}/api/plan`);
+      const plan = await planResponse.json() as {
+        pfmPacket?: { kind?: string };
+        sourceSave?: {
+          enabled?: boolean;
+          hash: string;
+          mtimeMs: number;
+          eol: "lf" | "crlf" | "mixed" | "none";
+        };
+      };
+      expect(plan.pfmPacket?.kind).toBe("visual-plan");
+      expect(plan.sourceSave?.enabled).toBe(true);
+
+      const response = await fetch(`${server.url}/api/source/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: "---\npfm: visual-plan\n---\n\n# After\n",
+          baseHash: plan.sourceSave!.hash,
+          baseMtimeMs: plan.sourceSave!.mtimeMs,
+          baseEol: plan.sourceSave!.eol,
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(readFileSync(sourcePath, "utf-8")).toBe("---\npfm: visual-plan\n---\n\n# After\n");
     } finally {
       server.stop();
     }
@@ -437,6 +660,54 @@ describe("annotate server: source save", () => {
       });
 
       expect(recreateNeverOpened.status).toBe(403);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("keeps folder source save enabled for opened visual packet files", async () => {
+    const folderPath = mkdtempSync(join(tmpdir(), "plannotator-visual-folder-source-save-"));
+    const openedPath = join(folderPath, "visual-plan.md");
+    writeFileSync(openedPath, "---\npfm: visual-plan\n---\n\n# Before\n", "utf-8");
+
+    const server = await startAnnotateServer({
+      markdown: "",
+      filePath: folderPath,
+      folderPath,
+      mode: "annotate-folder",
+      htmlContent: MINIMAL_HTML,
+      gate: true,
+    });
+
+    try {
+      const docResponse = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(openedPath)}`);
+      const doc = await docResponse.json() as {
+        pfmPacket?: { kind?: string };
+        sourceSave?: {
+          enabled?: boolean;
+          path: string;
+          hash: string;
+          mtimeMs: number;
+          eol: "lf" | "crlf" | "mixed" | "none";
+        };
+      };
+      expect(doc.pfmPacket?.kind).toBe("visual-plan");
+      expect(doc.sourceSave?.enabled).toBe(true);
+
+      const response = await fetch(`${server.url}/api/source/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          path: doc.sourceSave!.path,
+          text: "---\npfm: visual-plan\n---\n\n# After\n",
+          baseHash: doc.sourceSave!.hash,
+          baseMtimeMs: doc.sourceSave!.mtimeMs,
+          baseEol: doc.sourceSave!.eol,
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(readFileSync(openedPath, "utf-8")).toBe("---\npfm: visual-plan\n---\n\n# After\n");
     } finally {
       server.stop();
     }

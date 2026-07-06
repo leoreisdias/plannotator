@@ -21,6 +21,13 @@ const CORE_SKILLS = [
   "plannotator-last",
 ];
 
+const EXTRA_SKILLS = [
+  "plannotator-compound",
+  "plannotator-setup-goal",
+  "plannotator-visual-plan",
+  "plannotator-visual-explainer",
+];
+
 describe("install.sh", () => {
   const script = readFileSync(join(scriptsDir, "install.sh"), "utf-8");
 
@@ -170,8 +177,9 @@ describe("install.sh", () => {
     // Kiro-specific skills (origin baked in) come from apps/kiro-cli/skills.
     expect(script).toContain('copy_skill_if_present apps/kiro-cli/skills/plannotator-review "$KIRO_SKILLS_DIR"');
     expect(script).toContain('copy_skill_if_present apps/kiro-cli/skills/plannotator-annotate "$KIRO_SKILLS_DIR"');
-    // The two extras Kiro keeps receiving come from apps/skills/extra.
+    // Shared extras Kiro receives come from apps/skills/extra.
     expect(script).toContain('copy_skill_if_present apps/skills/extra/plannotator-setup-goal "$KIRO_SKILLS_DIR"');
+    expect(script).toContain('copy_skill_if_present apps/skills/extra/plannotator-visual-plan "$KIRO_SKILLS_DIR"');
     expect(script).toContain('copy_skill_if_present apps/skills/extra/plannotator-visual-explainer "$KIRO_SKILLS_DIR"');
     // sparse-checkout fetches apps/kiro-cli (skills + agent example).
     expect(script).toContain("git sparse-checkout set apps/skills apps/kiro-cli");
@@ -195,10 +203,10 @@ describe("install.sh", () => {
     // previously-stale compound/setup-goal.
     expect(script).toContain("STALE_CODEX_SKILLS_DIR");
     expect(script).toContain(
-      "for skill in plannotator-review plannotator-annotate plannotator-last plannotator-compound plannotator-setup-goal; do",
+      "for skill in plannotator-review plannotator-annotate plannotator-last plannotator-compound plannotator-setup-goal plannotator-visual-plan; do",
     );
     // Extras stop being managed in the Claude and shared-agent scopes.
-    expect(script).toContain("plannotator-compound plannotator-setup-goal plannotator-visual-explainer");
+    expect(script).toContain(EXTRA_SKILLS.join(" "));
     // plannotator-archive no longer ships as a skill — a stale installed copy
     // is removed unconditionally from every skill scope.
     expect(script).toContain(
@@ -210,7 +218,7 @@ describe("install.sh", () => {
   });
 
   test("suggests installing extras via npx skills add", () => {
-    expect(script).toContain("Optional skills (compound planning, setup-goal, visual explainer):");
+    expect(script).toContain("Optional skills (compound planning, setup-goal, visual plan, visual explainer):");
     expect(script).toContain("npx skills add backnotprop/plannotator/apps/skills/extra");
   });
 
@@ -385,9 +393,9 @@ describe("install.ps1", () => {
     expect(script).not.toContain("legacyAgentsSkillsDir");
     // Codex cleanup includes the per-command skills now.
     expect(script).toContain("staleCodexSkillsDir");
-    expect(script).toContain('"plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-compound", "plannotator-setup-goal"');
+    expect(script).toContain('"plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-compound", "plannotator-setup-goal", "plannotator-visual-plan"');
     // Extras removed from Claude + shared-agent scopes, once, via the ledger.
-    expect(script).toContain('"plannotator-compound", "plannotator-setup-goal", "plannotator-visual-explainer"');
+    expect(script).toContain('"plannotator-compound", "plannotator-setup-goal", "plannotator-visual-plan", "plannotator-visual-explainer"');
     expect(script).toContain("2026-06-extras-default-install-removed");
     expect(script).toContain("if (-not (Test-Path $extrasMigration))");
     // plannotator-archive no longer ships as a skill — a stale installed copy
@@ -407,7 +415,7 @@ describe("install.ps1", () => {
   });
 
   test("suggests installing extras via npx skills add", () => {
-    expect(script).toContain("Optional skills (compound planning, setup-goal, visual explainer):");
+    expect(script).toContain("Optional skills (compound planning, setup-goal, visual plan, visual explainer):");
     expect(script).toContain("npx skills add backnotprop/plannotator/apps/skills/extra");
   });
 
@@ -512,9 +520,9 @@ describe("install.cmd", () => {
     expect(script).not.toContain("LEGACY_AGENTS_SKILLS_DIR");
     // Codex cleanup includes the per-command skills now.
     expect(script).toContain("STALE_CODEX_SKILLS_DIR");
-    expect(script).toContain("for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator-compound plannotator-setup-goal) do");
+    expect(script).toContain("for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator-compound plannotator-setup-goal plannotator-visual-plan) do");
     // Extras removed from Claude + shared-agent scopes, once, via the ledger.
-    expect(script).toContain("for %%S in (plannotator-compound plannotator-setup-goal plannotator-visual-explainer) do");
+    expect(script).toContain("for %%S in (plannotator-compound plannotator-setup-goal plannotator-visual-plan plannotator-visual-explainer) do");
     expect(script).toContain("2026-06-extras-default-install-removed");
     expect(script).toContain('if not exist "!EXTRAS_MIGRATION!"');
     // plannotator-archive no longer ships as a skill — a stale installed copy

@@ -139,6 +139,7 @@ import {
   isTopLevelHelpInvocation,
   isVersionInvocation,
 } from "./cli";
+import { formatAnnotateOutcome } from "./annotate-outcome";
 import path from "path";
 import { tmpdir } from "os";
 import { buildLocalWorkspaceReview, type WorkspaceDiffType } from "@plannotator/server/review-workspace";
@@ -200,41 +201,21 @@ if (renderMarkdownFlag) args.splice(renderMarkdownIdx, 1);
 // Plaintext (default):
 //   Close → empty. Approve → "The user approved." Annotate → feedback.
 //
-// TODO: The plaintext --gate approval sentinel must stay as the exact string
-// "The user approved." because slash command templates (plannotator-annotate.md,
-// plannotator-last.md) instruct the agent to match it literally. Making this
-// configurable requires updating those templates to accept dynamic values or
-// switching gate mode to structured output only.
-const APPROVED_PLAINTEXT_MARKER = "The user approved.";
-
 function emitAnnotateOutcome(result: {
   feedback: string;
   exit?: boolean;
   approved?: boolean;
+  selectedMessageId?: string;
+  feedbackScope?: "message" | "messages";
 }): void {
+  let format: "hook" | "json" | "plaintext" = "plaintext";
   if (hookFlag) {
-    if (result.approved || result.exit) return;
-    if (result.feedback) {
-      console.log(JSON.stringify({ decision: "block", reason: result.feedback }));
-    }
-    return;
+    format = "hook";
+  } else if (jsonFlag) {
+    format = "json";
   }
-  if (jsonFlag) {
-    if (result.approved) {
-      console.log(JSON.stringify({ decision: "approved" }));
-    } else if (result.exit) {
-      console.log(JSON.stringify({ decision: "dismissed" }));
-    } else {
-      console.log(JSON.stringify({ decision: "annotated", feedback: result.feedback || "" }));
-    }
-    return;
-  }
-  if (result.exit) return;
-  if (result.approved) {
-    console.log(APPROVED_PLAINTEXT_MARKER);
-    return;
-  }
-  if (result.feedback) console.log(result.feedback);
+  const output = formatAnnotateOutcome(result, format);
+  if (output) console.log(output);
 }
 
 async function loadGoalSetupBundle(

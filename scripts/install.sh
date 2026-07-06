@@ -58,7 +58,7 @@ Options:
   --skip-attestation     Force-skip provenance verification even if enabled
                          via env var or ~/.plannotator/config.json.
   --extras               Install the extra skills (compound, setup-goal,
-                         visual-explainer) via `npx skills add` without asking.
+                         visual-plan, visual-explainer) via `npx skills add` without asking.
   --no-extras            Skip the extras without asking.
   --model-invocable <l>  Comma-separated skill names to make model-invocable
                          (e.g. plannotator-review,plannotator-compound), or
@@ -799,7 +799,7 @@ MIGRATIONS_DIR="$_config_dir/migrations"
 EXTRAS_MIGRATION="$MIGRATIONS_DIR/2026-06-extras-default-install-removed"
 if [ ! -f "$EXTRAS_MIGRATION" ]; then
     for scope in "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR"; do
-        for skill in plannotator-compound plannotator-setup-goal plannotator-visual-explainer; do
+        for skill in plannotator-compound plannotator-setup-goal plannotator-visual-plan plannotator-visual-explainer; do
             if [ -d "$scope/$skill" ]; then
                 rm -rf "$scope/$skill"
                 echo "Removed extra Plannotator skill from ${scope}/$skill (reinstall via npx skills add)"
@@ -817,7 +817,7 @@ fi
 # CI runs without a terminal never prompt. CLI flags win over everything.
 PREFS_FILE="$_config_dir/install-prefs"
 CORE_SKILL_NAMES="plannotator-review plannotator-annotate plannotator-last"
-EXTRA_SKILL_NAMES="plannotator-compound plannotator-setup-goal plannotator-visual-explainer"
+EXTRA_SKILL_NAMES="plannotator-compound plannotator-setup-goal plannotator-visual-plan plannotator-visual-explainer"
 
 saved_extras=""
 saved_invocable=""
@@ -973,7 +973,7 @@ if [ "$run_wizard" -eq 1 ]; then
         # Flag already answered this question — don't ask and then ignore.
         extras_choice="$EXTRAS_FLAG"
     else
-        extras_choice=$(ask_yes_no "Install the extra skills (compound planning, setup-goal, visual explainer)?" "${saved_extras:-no}") || wizard_timed_out=1
+        extras_choice=$(ask_yes_no "Install the extra skills (compound planning, setup-goal, visual plan, visual explainer)?" "${saved_extras:-no}") || wizard_timed_out=1
     fi
     invocable_list="$CORE_SKILL_NAMES"
     if [ "$extras_choice" = "yes" ]; then
@@ -1138,6 +1138,7 @@ checkout_failed=0
         copy_skill_if_present apps/kiro-cli/skills/plannotator-annotate "$KIRO_SKILLS_DIR"
         # Extras come from apps/skills/extra (not duplicated into apps/kiro-cli/skills).
         copy_skill_if_present apps/skills/extra/plannotator-setup-goal "$KIRO_SKILLS_DIR"
+        copy_skill_if_present apps/skills/extra/plannotator-visual-plan "$KIRO_SKILLS_DIR"
         copy_skill_if_present apps/skills/extra/plannotator-visual-explainer "$KIRO_SKILLS_DIR"
         # Plannotator custom agent — don't clobber a user's existing one.
         if [ ! -f "$HOME/.kiro/agents/plannotator.json" ] && [ -f "apps/kiro-cli/agents/plannotator.json" ]; then
@@ -1186,7 +1187,7 @@ fi
 # Codex no longer hosts core skills (they now live in ~/.agents/skills).
 # Core skills are removed only once their replacement exists; the stale
 # shared-agent extras were never Codex's and are removed unconditionally.
-for skill in plannotator-review plannotator-annotate plannotator-last plannotator-compound plannotator-setup-goal; do
+for skill in plannotator-review plannotator-annotate plannotator-last plannotator-compound plannotator-setup-goal plannotator-visual-plan; do
     if [ -d "$STALE_CODEX_SKILLS_DIR/$skill" ]; then
         case "$skill" in
             plannotator-review|plannotator-annotate|plannotator-last)
@@ -1373,7 +1374,7 @@ echo "The /plannotator-review, /plannotator-annotate, and /plannotator-last comm
 
 if [ "$extras_choice" != "yes" ]; then
     echo ""
-    echo "Optional skills (compound planning, setup-goal, visual explainer):"
+    echo "Optional skills (compound planning, setup-goal, visual plan, visual explainer):"
     echo "  npx skills add backnotprop/plannotator/apps/skills/extra"
 fi
 

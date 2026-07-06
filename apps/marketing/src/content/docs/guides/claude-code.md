@@ -89,7 +89,7 @@ Opens any markdown file in the annotation UI. See the [annotate docs](/docs/comm
 
 Annotates the agent's most recent message. See the [annotate last docs](/docs/commands/annotate-last/) for details.
 
-Optional extra skills (compound planning, setup-goal, visual explainer) are not installed by default. Add them with:
+Optional extra skills (compound planning, setup-goal, visual plan, visual explainer) are not installed by default. Add them with:
 
 ```bash
 npx skills add backnotprop/plannotator/apps/skills/extra

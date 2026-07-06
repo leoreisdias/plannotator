@@ -14,6 +14,7 @@ import {
   runVcsDiff,
   stageFile,
   startPlanReviewServer,
+  startAnnotateServer,
   startReviewServer,
   unstageFile,
 } from "./server";
@@ -1005,6 +1006,45 @@ describe("pi review server", () => {
       server.stop();
     }
   }, 20_000);
+});
+
+describe("pi annotate server", () => {
+  test("marks visual packet annotate gates without changing annotate mode", async () => {
+    process.env.PLANNOTATOR_PORT = String(await reservePort());
+
+    const server = await startAnnotateServer({
+      markdown: "---\npfm: visual-plan\n---\n\n# Plan\n",
+      filePath: join(tmpdir(), "pi-visual-plan.md"),
+      htmlContent: "<!doctype html><html><body>annotate</body></html>",
+      gate: true,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/plan`);
+      const plan = await response.json() as {
+        mode?: string;
+        gate?: boolean;
+        pfmPacket?: { kind?: string; visual?: boolean; detectedBy?: string };
+      };
+
+      expect(plan.mode).toBe("annotate");
+      expect(plan.gate).toBe(true);
+      expect(plan.pfmPacket).toEqual({
+        kind: "visual-plan",
+        visual: true,
+        detectedBy: "frontmatter",
+      });
+
+      await fetch(`${server.url}/api/approve`, { method: "POST" });
+      await expect(server.waitForDecision()).resolves.toEqual({
+        feedback: "",
+        annotations: [],
+        approved: true,
+      });
+    } finally {
+      server.stop();
+    }
+  });
 });
 
 describe("pi plan server file browser", () => {
