@@ -22,6 +22,7 @@ interface AnnotationToolbarProps {
   selectedOriginalCode?: string;
   isEditing?: boolean;
   setShowCodeModal: (show: boolean) => void;
+  setShowCommentModal: (show: boolean) => void;
   onSubmit: () => void;
   onDismiss: () => void;
   onCancel: () => void;
@@ -54,6 +55,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   selectedOriginalCode,
   isEditing = false,
   setShowCodeModal,
+  setShowCommentModal,
   onSubmit,
   onDismiss,
   onCancel,
@@ -128,7 +130,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           dragHandleProps={dragHandleProps}
         />
       ) : (
-        <div className="w-80">
+        <div className="w-80 max-w-[calc(100vw-2rem)] flex flex-col">
           <div className="flex items-center justify-between mb-2" {...dragHandleProps}>
             <span className="text-xs text-muted-foreground">
               {isEditing
@@ -137,15 +139,25 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
                   ? formatTokenContext(toolbarState.tokenSelection)
                   : formatLineRange(toolbarState.range.start, toolbarState.range.end)}
             </span>
-            <button
-              onClick={onCancel}
-              className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-              title="Cancel"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setShowCommentModal(true)}
+                className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                title="Expand comment"
+                aria-label="Expand comment"
+              >
+                <ExpandIcon />
+              </button>
+              <button
+                onClick={onCancel}
+                className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                title="Cancel"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
           </div>
 
           {conventionalCommentsEnabled && (
@@ -162,7 +174,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
             value={commentText}
             onChange={(e) => setCommentText(e.target.value)}
             placeholder="Leave feedback..."
-            className="w-full px-3 py-2 bg-muted rounded-lg text-xs resize-none focus:outline-none focus:ring-1 focus:ring-primary/50"
+            className="w-full min-h-[4.5rem] max-h-[calc(100vh-16rem)] px-3 py-2 bg-muted rounded-lg text-xs leading-6 resize-y border-0 focus:outline-none focus:ring-1 focus:ring-primary/50 placeholder:text-muted-foreground"
             rows={3}
             autoFocus
             onKeyDown={(e) => {
@@ -272,3 +284,9 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
 
   return createPortal(content, document.body);
 };
+
+const ExpandIcon = () => (
+  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5" />
+  </svg>
+);

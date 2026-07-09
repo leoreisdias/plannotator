@@ -64,6 +64,7 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
   const [showSuggestedCode, setShowSuggestedCode] = useState(false);
   const [selectedOriginalCode, setSelectedOriginalCode] = useState('');
   const [showCodeModal, setShowCodeModal] = useState(false);
+  const [showCommentModal, setShowCommentModal] = useState(false);
   const [modalLayout, setModalLayout] = useState<'horizontal' | 'vertical'>('horizontal');
   const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null);
   const [conventionalLabel, setConventionalLabel] = useState<ConventionalLabel | null>(null);
@@ -128,6 +129,7 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
     setSelectedOriginalCode('');
     setShowSuggestedCode(false);
     setShowCodeModal(false);
+    setShowCommentModal(false);
     setEditingAnnotationId(null);
     setConventionalLabel(null);
     setDecorations([]);
@@ -148,6 +150,8 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
   ) => {
     saveDraft();
     setEditingAnnotationId(null);
+    setShowCodeModal(false);
+    setShowCommentModal(false);
 
     const draft = draftStore.get(draftKey(filePath, range));
     if (draft) {
@@ -233,6 +237,7 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
     setSelectedOriginalCode(annotation.originalCode || '');
     setShowSuggestedCode(!!annotation.suggestedCode);
     setShowCodeModal(false);
+    setShowCommentModal(false);
     setConventionalLabel(annotation.conventionalLabel || null);
     setDecorations(annotation.decorations || []);
 
@@ -263,7 +268,7 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
   }, [onLineSelection, clearDraft, resetForm]);
 
   useDismissOnOutsideAndEscape({
-    enabled: !!toolbarState && !showCodeModal,
+    enabled: !!toolbarState && !showCodeModal && !showCommentModal,
     ref: toolbarRef,
     onDismiss: handleDismiss,
   });
@@ -292,6 +297,7 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
       setDecorations(draft.decorations);
       setEditingAnnotationId(null);
       setShowCodeModal(false);
+      setShowCommentModal(false);
       setToolbarState({
         position: draft.position,
         range: draft.range,
@@ -349,6 +355,8 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
     selectedOriginalCode,
     showCodeModal,
     setShowCodeModal,
+    showCommentModal,
+    setShowCommentModal,
     modalLayout,
     setModalLayout,
     editingAnnotationId,
