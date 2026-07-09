@@ -3069,6 +3069,7 @@ const ReviewApp: React.FC = () => {
                           isLoading={isApproving}
                           muted={platformApproveMuted}
                           title={platformApproveTitle}
+                          className={showApproveAndNext ? 'rounded-r-none' : undefined}
                         />
                         {showApproveAndNext && (
                           <button
@@ -3080,7 +3081,7 @@ const ReviewApp: React.FC = () => {
                             disabled={platformApproveDisabled}
                             title={`Approve and review ${nextApproveLabel}`}
                             aria-label={`Approve and review ${nextApproveLabel}`}
-                            className="ml-px inline-flex h-7 w-7 items-center justify-center rounded-l-none rounded-r-md bg-success text-success-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-l-none rounded-r-md border-l border-success-foreground/35 bg-success text-success-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:border-muted-foreground/25 disabled:bg-muted disabled:text-muted-foreground"
                           >
                             <ArrowRight className="h-3.5 w-3.5" />
                           </button>
