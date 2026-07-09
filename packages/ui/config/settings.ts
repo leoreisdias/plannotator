@@ -276,6 +276,20 @@ export const SETTINGS = {
     },
     toServer: (v: boolean) => ({ conventionalComments: v }),
   },
+  platformReviewAttribution: {
+    defaultValue: true as boolean,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-platform-review-attribution');
+      return v === 'true' ? true : v === 'false' ? false : undefined;
+    },
+    toCookie: (v: boolean) => storage.setItem('plannotator-platform-review-attribution', String(v)),
+    serverKey: 'platformReviewAttribution',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = sc.platformReviewAttribution;
+      return typeof v === 'boolean' ? v : undefined;
+    },
+    toServer: (v: boolean) => ({ platformReviewAttribution: v }),
+  },
   /** JSON-serialized array of label configs, or null for defaults.
    *  Synced to ~/.plannotator/config.json as a parsed array (not a string). */
   conventionalLabels: {

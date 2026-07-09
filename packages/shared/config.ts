@@ -88,6 +88,7 @@ export interface PlannotatorConfig {
   diffOptions?: DiffOptions;
   prompts?: PromptConfig;
   conventionalComments?: boolean;
+  platformReviewAttribution?: boolean;
   /** null = explicitly cleared (use defaults), undefined = not set */
   conventionalLabels?: CCLabelConfig[] | null;
   /**
@@ -201,6 +202,7 @@ export function getServerConfig(gitUser: string | null): {
   diffOptions?: DiffOptions;
   gitUser?: string;
   conventionalComments?: boolean;
+  platformReviewAttribution?: boolean;
   conventionalLabels?: CCLabelConfig[] | null;
 } {
   const cfg = loadConfig();
@@ -209,6 +211,7 @@ export function getServerConfig(gitUser: string | null): {
     diffOptions: cfg.diffOptions,
     gitUser: gitUser ?? undefined,
     ...(cfg.conventionalComments !== undefined && { conventionalComments: cfg.conventionalComments }),
+    ...(cfg.platformReviewAttribution !== undefined && { platformReviewAttribution: cfg.platformReviewAttribution }),
     ...(cfg.conventionalLabels !== undefined && { conventionalLabels: cfg.conventionalLabels }),
   };
 }

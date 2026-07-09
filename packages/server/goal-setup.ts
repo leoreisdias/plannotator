@@ -140,6 +140,7 @@ export async function startGoalSetupServer(
                 displayName?: string;
                 diffOptions?: Record<string, unknown>;
                 conventionalComments?: boolean;
+                platformReviewAttribution?: boolean;
                 conventionalLabels?: unknown[] | null;
               };
               const toSave: Record<string, unknown> = {};
@@ -151,6 +152,9 @@ export async function startGoalSetupServer(
               }
               if (body.conventionalComments !== undefined) {
                 toSave.conventionalComments = body.conventionalComments;
+              }
+              if (body.platformReviewAttribution !== undefined) {
+                toSave.platformReviewAttribution = body.platformReviewAttribution;
               }
               if (body.conventionalLabels !== undefined) {
                 toSave.conventionalLabels = body.conventionalLabels;

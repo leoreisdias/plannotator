@@ -207,6 +207,7 @@ const ReviewApp: React.FC = () => {
   const diffFontFamily = useConfigValue('diffFontFamily');
   const diffFontSize = useConfigValue('diffFontSize');
   const diffTabSize = useConfigValue('diffTabSize');
+  const platformReviewAttribution = useConfigValue('platformReviewAttribution');
   // Global plan-look preference; surfaced here only by the shared 0.20.0
   // look-and-feel announcement (the grid/clean chooser applies to plan review).
   const gridEnabled = useConfigValue('gridEnabled');
@@ -2443,7 +2444,7 @@ const ReviewApp: React.FC = () => {
       const bodyForTarget = (target: SubmissionTarget) => {
         const parts: string[] = [];
         if (generalComment) parts.push(generalComment);
-        parts.push('Review from Plannotator');
+        if (platformReviewAttribution) parts.push('Review from Plannotator');
         if (target.fileScopedBody) parts.push(target.fileScopedBody);
         return parts.join('\n\n');
       };
@@ -2529,7 +2530,7 @@ const ReviewApp: React.FC = () => {
     } finally {
       setIsPlatformActioning(false);
     }
-  }, [platformOpenPR, platformLabel, mrLabel, prMetadata]);
+  }, [platformOpenPR, platformLabel, mrLabel, prMetadata, platformReviewAttribution]);
 
   const openPlatformDialog = useCallback((action: 'approve' | 'comment') => {
     const diffPaths = new Set(files.map(f => f.path));

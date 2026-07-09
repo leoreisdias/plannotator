@@ -487,6 +487,7 @@ function parseCCLabels(json: string | null): CCLabelConfig[] {
 
 const CommentsTab: React.FC = () => {
   const conventionalComments = useConfigValue('conventionalComments');
+  const platformReviewAttribution = useConfigValue('platformReviewAttribution');
   const labelsJson = useConfigValue('conventionalLabels');
   const [labels, setLabels] = useState(() => parseCCLabels(labelsJson));
 
@@ -522,6 +523,15 @@ const CommentsTab: React.FC = () => {
 
   return (
     <>
+      <ToggleSwitch
+        checked={platformReviewAttribution}
+        onChange={(v) => configStore.set('platformReviewAttribution', v)}
+        label="Plannotator Attribution"
+        description="Include “Review from Plannotator” in GitHub and GitLab review bodies"
+      />
+
+      <div className="border-t border-border" />
+
       <ToggleSwitch
         checked={conventionalComments}
         onChange={(v) => configStore.set('conventionalComments', v)}
