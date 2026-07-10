@@ -215,7 +215,7 @@ export async function startAnnotateServer(
         };
       } catch (error) {
         console.error(
-          `Plannotator: annotate history unavailable (${error instanceof Error ? error.message : String(error)}); continuing without version diff`,
+          `[plannotator] annotate history unavailable (${error instanceof Error ? error.message : String(error)}); continuing without version diff`,
         );
       }
     }
