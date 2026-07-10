@@ -614,12 +614,16 @@ export async function handleFileBrowserFiles(req: Request): Promise<Response> {
 			limit: getFileBrowserMaxFiles(),
 			truncated: false,
 		};
-		await walkFileBrowserFiles(resolvedDir, resolvedDir, state);
+		// Seed the user's own modified/untracked files BEFORE the bulk walk: the
+		// walk fills the cap in raw readdir order and addFileBrowserFile drops
+		// everything once the cap latches — the one set of files that must never
+		// silently vanish from the browser is the ones the user just touched.
 		const workspaceStatus = filterWorkspaceStatusForDirectory(await getWorkspaceStatusForDirectory(resolvedDir), resolvedDir, includeWorkspaceFile);
 		for (const match of getWorkspaceStatusRelativePaths(workspaceStatus, resolvedDir, includeWorkspaceFile)) {
 			addFileBrowserFile(state, match);
 			if (state.truncated) break;
 		}
+		await walkFileBrowserFiles(resolvedDir, resolvedDir, state);
 		const sortedFiles = [...state.files].sort();
 
 		const tree = buildFileTree(sortedFiles);

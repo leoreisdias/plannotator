@@ -117,8 +117,15 @@ function toastPlannotatorUrl(client: OpenCodeClient, message: string, toastedUrl
       body: { title: "Plannotator", message, variant: "info" },
     });
     // A fetch-level failure (host restarting) rejects the SDK promise; swallow
-    // it so a cosmetic toast can never surface an unhandled rejection.
-    if (result && typeof result.catch === "function") result.catch(() => {});
+    // it so a cosmetic toast can never surface an unhandled rejection — but
+    // un-mark the URL so the other delivery path (stderr forwarder vs
+    // ready-file poller) can still attempt a toast, and leave a log trail.
+    if (result && typeof result.catch === "function") {
+      result.catch(() => {
+        toastedUrls.delete(url);
+        log(client, "info", `[Plannotator] Toast delivery failed for ${url}`);
+      });
+    }
   } catch {
     // Toast delivery is best-effort.
   }

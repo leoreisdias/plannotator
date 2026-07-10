@@ -2594,6 +2594,11 @@ const ReviewApp: React.FC = () => {
           setPlatformActionError(null);
           return next;
         });
+        // The spotlight coachmark advertises this exact gesture ("double-tap
+        // Alt to switch") — performing it must dismiss the coachmark. Its own
+        // keydown handler deliberately ignores modifier keys, so this keyup
+        // path is the only place that can see the gesture complete.
+        if (showDestSpotlight) dismissDestSpotlight();
         lastAltUp = 0;
       } else {
         lastAltUp = now;
@@ -2606,7 +2611,7 @@ const ReviewApp: React.FC = () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [prMetadata]);
+  }, [prMetadata, showDestSpotlight, dismissDestSpotlight]);
 
   // Cmd/Ctrl+Enter keyboard shortcut to approve or send feedback
   useEffect(() => {

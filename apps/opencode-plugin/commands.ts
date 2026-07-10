@@ -14,6 +14,7 @@ import {
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
 import { type DiffType, prepareLocalReviewDiff, detectManagedVcs } from "@plannotator/server/vcs";
+import { detectProjectName } from "@plannotator/server/project";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
 import {
@@ -307,11 +308,16 @@ export async function handleAnnotateCommand(
     }
   }
 
+  // Per-project scoping for the annotate version history — matches the hook
+  // and Pi runtimes, which both pass it (otherwise history lands in the
+  // shared "_unknown" bucket).
+  const annotateProject = (await detectProjectName()) ?? undefined;
   const server = await startServer({
     markdown,
     filePath: absolutePath,
     origin: "opencode",
     mode: annotateMode,
+    project: annotateProject,
     folderPath,
     sourceInfo,
     sourceConverted,
@@ -423,11 +429,13 @@ export async function handleAnnotateLastCommand(
 
   const pickerMessages = recentMessages.length > 1 ? recentMessages : undefined;
 
+  const lastProject = (await detectProjectName()) ?? undefined;
   const server = await startServer({
     markdown: lastText,
     filePath: "last-message",
     origin: "opencode",
     mode: "annotate-last",
+    project: lastProject,
     recentMessages: pickerMessages,
     sharingEnabled: await getSharingEnabled(),
     shareBaseUrl: getShareBaseUrl(),
