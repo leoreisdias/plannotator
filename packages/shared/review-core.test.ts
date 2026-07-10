@@ -12,6 +12,8 @@ import {
   gitResetFile,
   isSameCwdCommitSwitch,
   listRecentCommits,
+  partitionGitHubReviewComments,
+  prepareGitHubReviewSubmission,
   parseCommitDiffType,
   parseWorktreeDiffType,
   runGitDiff,
@@ -19,6 +21,82 @@ import {
   type DiffType,
   type ReviewGitRuntime,
 } from "./review-core";
+
+describe("partitionGitHubReviewComments", () => {
+  const patch = [
+    "diff --git a/src/modules/branding/schema.ts b/src/modules/branding/schema.ts",
+    "--- a/src/modules/branding/schema.ts",
+    "+++ b/src/modules/branding/schema.ts",
+    "@@ -171,6 +175,9 @@ export function toMutationData() {",
+    " context 175",
+    " context 176",
+    " context 177",
+    "+added 178",
+    "+added 179",
+    "+added 180",
+    " context 181",
+    " context 182",
+    " context 183",
+  ].join("\n");
+
+  test("demotes a multiline comment whose end falls outside the GitHub hunk", () => {
+    const comment = {
+      path: "src/modules/branding/schema.ts",
+      line: 185,
+      side: "RIGHT" as const,
+      start_line: 178,
+      start_side: "RIGHT" as const,
+      body: "Persist editable Auth0 fields before syncing",
+    };
+
+    expect(partitionGitHubReviewComments(patch, [comment])).toEqual({
+      inlineComments: [],
+      bodyComments: [comment],
+    });
+  });
+
+  test("keeps a multiline comment whose endpoints are in the same GitHub hunk", () => {
+    const comment = {
+      path: "src/modules/branding/schema.ts",
+      line: 180,
+      side: "RIGHT" as const,
+      start_line: 178,
+      start_side: "RIGHT" as const,
+      body: "Persist editable Auth0 fields before syncing",
+    };
+
+    expect(partitionGitHubReviewComments(patch, [comment])).toEqual({
+      inlineComments: [comment],
+      bodyComments: [],
+    });
+  });
+
+  test("preserves a non-commentable annotation in the review body", () => {
+    const valid = {
+      path: "src/modules/branding/schema.ts",
+      line: 180,
+      side: "RIGHT" as const,
+      start_line: 178,
+      start_side: "RIGHT" as const,
+      body: "Valid inline finding",
+    };
+    const invalid = {
+      ...valid,
+      line: 185,
+      body: "Persist editable Auth0 fields before syncing",
+    };
+
+    expect(prepareGitHubReviewSubmission(patch, "Review from Plannotator", [valid, invalid])).toEqual({
+      body: [
+        "Review from Plannotator",
+        "**src/modules/branding/schema.ts:178-185 (new):**",
+        "Persist editable Auth0 fields before syncing",
+      ].join("\n\n"),
+      fileComments: [valid],
+      demotedCount: 1,
+    });
+  });
+});
 
 describe("splitPorcelainRename", () => {
   test("splits a plain rename on the top-level separator", () => {
@@ -526,4 +604,3 @@ describe("commit diff mode", () => {
     expect(after).toBe(before);
   });
 });
-

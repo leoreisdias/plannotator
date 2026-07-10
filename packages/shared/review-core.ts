@@ -7,6 +7,7 @@
 
 import { resolve as resolvePath } from "node:path";
 import { unquoteGitPath, parsePatchPathToken, parseDiffFilePathLines, parseDiffGitHeader } from "./diff-paths";
+import type { PRReviewFileComment } from "./pr-types";
 
 export const JJ_TRUNK_REVSET = "trunk()";
 
@@ -1578,4 +1579,99 @@ export function listPatchFiles(
   }
 
   return files;
+}
+
+type ReviewableHunk = {
+  left: Set<number>;
+  right: Set<number>;
+};
+
+function getReviewableHunksByPath(patch: string): Map<string, ReviewableHunk[]> {
+  const hunksByPath = new Map<string, ReviewableHunk[]>();
+  const chunkStarts = [...patch.matchAll(/^diff --git /gm)];
+
+  for (let i = 0; i < chunkStarts.length; i++) {
+    const start = chunkStarts[i].index ?? 0;
+    const end = chunkStarts[i + 1]?.index ?? patch.length;
+    const lines = patch.slice(start, end).split("\n");
+    const bodyPaths = parseDiffFilePathLines(lines);
+    const headerPaths = parseDiffGitHeader(lines[0] ?? "");
+    const path = bodyPaths.newPath ?? bodyPaths.oldPath ?? headerPaths.newPath ?? headerPaths.oldPath;
+    if (!path) continue;
+
+    const hunks: ReviewableHunk[] = [];
+    let currentHunk: ReviewableHunk | undefined;
+    let oldLine = 0;
+    let newLine = 0;
+
+    for (const line of lines) {
+      const header = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (header) {
+        oldLine = Number.parseInt(header[1], 10) - 1;
+        newLine = Number.parseInt(header[2], 10) - 1;
+        currentHunk = { left: new Set(), right: new Set() };
+        hunks.push(currentHunk);
+        continue;
+      }
+      if (!currentHunk) continue;
+
+      if (line.startsWith(" ")) {
+        currentHunk.left.add(++oldLine);
+        currentHunk.right.add(++newLine);
+      } else if (line.startsWith("-")) {
+        currentHunk.left.add(++oldLine);
+      } else if (line.startsWith("+")) {
+        currentHunk.right.add(++newLine);
+      }
+    }
+
+    hunksByPath.set(path, hunks);
+  }
+
+  return hunksByPath;
+}
+
+export function partitionGitHubReviewComments(
+  patch: string,
+  comments: PRReviewFileComment[],
+): { inlineComments: PRReviewFileComment[]; bodyComments: PRReviewFileComment[] } {
+  const hunksByPath = getReviewableHunksByPath(patch);
+  const inlineComments: PRReviewFileComment[] = [];
+  const bodyComments: PRReviewFileComment[] = [];
+
+  for (const comment of comments) {
+    const endSide = comment.side === "LEFT" ? "left" : "right";
+    const startSide = (comment.start_side ?? comment.side) === "LEFT" ? "left" : "right";
+    const startLine = comment.start_line ?? comment.line;
+    const isInline = (hunksByPath.get(comment.path) ?? []).some(
+      (hunk) => hunk[startSide].has(startLine) && hunk[endSide].has(comment.line),
+    );
+    (isInline ? inlineComments : bodyComments).push(comment);
+  }
+
+  return { inlineComments, bodyComments };
+}
+
+export function prepareGitHubReviewSubmission(
+  patch: string,
+  body: string,
+  comments: PRReviewFileComment[],
+): { body: string; fileComments: PRReviewFileComment[]; demotedCount: number } {
+  const { inlineComments, bodyComments } = partitionGitHubReviewComments(patch, comments);
+  if (bodyComments.length === 0) {
+    return { body, fileComments: comments, demotedCount: 0 };
+  }
+
+  const fallbackComments = bodyComments.map((comment) => {
+    const startLine = comment.start_line ?? comment.line;
+    const range = startLine === comment.line ? `${comment.line}` : `${startLine}-${comment.line}`;
+    const side = comment.side === "LEFT" ? "old" : "new";
+    return `**${comment.path}:${range} (${side}):**\n\n${comment.body}`;
+  });
+
+  return {
+    body: [body.trim(), ...fallbackComments].filter(Boolean).join("\n\n"),
+    fileComments: inlineComments,
+    demotedCount: bodyComments.length,
+  };
 }

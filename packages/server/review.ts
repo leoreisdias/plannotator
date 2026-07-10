@@ -22,6 +22,7 @@ import {
   getSinceBaseSections,
   detectRemoteDefaultInfo,
   listPatchFiles,
+  prepareGitHubReviewSubmission,
   type RemoteDefaultInfo,
   type SinceBaseSections,
 } from "@plannotator/shared/review-core";
@@ -2423,6 +2424,7 @@ export async function startReviewServer(
               let targetRef = prRef!;
               let targetHeadSha = prMetadata.headSha;
               let targetUrl = prMetadata.url;
+              let targetPatch = currentPatch;
 
               if (body.targetPrUrl) {
                 const cached = prSwitchCache.get(body.targetPrUrl);
@@ -2432,6 +2434,7 @@ export async function startReviewServer(
                 targetRef = prRefFromMetadata(cached.metadata);
                 targetHeadSha = cached.metadata.headSha;
                 targetUrl = cached.metadata.url;
+                targetPatch = cached.rawPatch;
               } else if (currentPRDiffScope !== "layer") {
                 return Response.json(
                   { error: "Switch to Layer diff before posting a platform review" },
@@ -2439,14 +2442,21 @@ export async function startReviewServer(
                 );
               }
 
-              console.error(`[pr-action] ${body.action} with ${body.fileComments.length} file comment(s), target=${targetUrl}, headSha=${targetHeadSha}`);
+              const submission = targetRef.platform === "github"
+                ? prepareGitHubReviewSubmission(targetPatch, body.body, body.fileComments)
+                : { body: body.body, fileComments: body.fileComments, demotedCount: 0 };
+
+              console.error(`[pr-action] ${body.action} with ${submission.fileComments.length} file comment(s), target=${targetUrl}, headSha=${targetHeadSha}`);
+              if (submission.demotedCount > 0) {
+                console.error(`[pr-action] Moved ${submission.demotedCount} non-commentable GitHub annotation(s) into the review body`);
+              }
 
               await submitPRReview(
                 targetRef,
                 targetHeadSha,
                 body.action,
-                body.body,
-                body.fileComments,
+                submission.body,
+                submission.fileComments,
               );
 
               console.error(`[pr-action] Success`);

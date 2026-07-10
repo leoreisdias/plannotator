@@ -39,6 +39,7 @@ import {
 	getSinceBaseSections,
 	isSameCwdCommitSwitch,
 	listPatchFiles,
+	prepareGitHubReviewSubmission,
 	parseCommitDiffType,
 	parseWorktreeDiffType,
 	resolveBaseBranch,
@@ -1944,6 +1945,7 @@ export async function startReviewServer(options: {
 				let targetRef = prRef;
 				let targetHeadSha = prMeta.headSha;
 				let targetUrl = prMeta.url;
+				let targetPatch = currentPatch;
 
 				if (targetPrUrl) {
 					const cached = prSwitchCache.get(targetPrUrl);
@@ -1954,18 +1956,26 @@ export async function startReviewServer(options: {
 					targetRef = prRefFromMetadata(cached.metadata);
 					targetHeadSha = cached.metadata.headSha;
 					targetUrl = cached.metadata.url;
+					targetPatch = cached.rawPatch;
 				} else if (currentPRDiffScope !== "layer") {
 					json(res, { error: "Switch to Layer diff before posting a platform review" }, 400);
 					return;
 				}
 
-				console.error(`[pr-action] ${body.action} with ${fileComments.length} file comment(s), target=${targetUrl}, headSha=${targetHeadSha}`);
+				const submission = targetRef.platform === "github"
+					? prepareGitHubReviewSubmission(targetPatch, body.body as string, fileComments)
+					: { body: body.body as string, fileComments, demotedCount: 0 };
+
+				console.error(`[pr-action] ${body.action} with ${submission.fileComments.length} file comment(s), target=${targetUrl}, headSha=${targetHeadSha}`);
+				if (submission.demotedCount > 0) {
+					console.error(`[pr-action] Moved ${submission.demotedCount} non-commentable GitHub annotation(s) into the review body`);
+				}
 				await submitPRReview(
 					targetRef,
 					targetHeadSha,
 					body.action as "approve" | "comment",
-					body.body as string,
-					fileComments,
+					submission.body,
+					submission.fileComments,
 				);
 				console.error(`[pr-action] Success`);
 				prContextLive.refreshAfterWrite(targetUrl, targetRef);
