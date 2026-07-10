@@ -50,6 +50,12 @@ export const CLAUDE_EFFORT: Array<{ value: string; label: string }> = [
 ];
 
 export const CODEX_MODELS: Array<{ value: string; label: string }> = [
+  // GPT-5.6 naming scheme: the bare `gpt-5.6` alias routes to `gpt-5.6-sol`
+  // (flagship); `-terra` is the mid price/performance tier and `-luna` the
+  // efficient high-volume tier.
+  { value: 'gpt-5.6', label: 'GPT-5.6' },
+  { value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
+  { value: 'gpt-5.6-luna', label: 'GPT-5.6 Luna' },
   { value: 'gpt-5.5', label: 'GPT-5.5' },
   { value: 'gpt-5.4', label: 'GPT-5.4' },
   { value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' },
