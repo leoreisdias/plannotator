@@ -127,6 +127,7 @@ import {
   type AgentTerminalDeliveryRecord,
   type AnnotateFeedbackTarget,
 } from './agentTerminalIntegration';
+import { resolveDocumentAreaClassName } from './documentAreaLayout';
 import {
   buildPlanEditPanelItem,
   buildDirectEditsSection,
@@ -4086,7 +4087,11 @@ const App: React.FC = () => {
           {/* Document Area */}
           <OverlayScrollArea
             element="main"
-            className={`flex-1 min-w-0 ${isHtmlSurface ? 'bg-background' : `${gridEnabled ? "bg-grid " : "bg-card "}${canShowCollapsedSidebarTabs ? 'lg:pl-[30px]' : ''}`}`}
+            className={resolveDocumentAreaClassName({
+              isHtmlSurface,
+              gridEnabled,
+              hasCollapsedSidebarTabs: canShowCollapsedSidebarTabs,
+            })}
             data-print-region="document"
             onViewportReady={handleViewportReady}
           >
