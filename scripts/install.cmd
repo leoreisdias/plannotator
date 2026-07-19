@@ -418,7 +418,7 @@ if "!VERIFY_ATTESTATION!"=="1" (
     )
 ) else (
     echo SHA256 verified. For build provenance verification, see
-    echo https://plannotator.ai/docs/getting-started/installation/#verifying-your-install
+    echo https://docs.plannotator.ai/open-source/start/installation#pin-or-verify-a-release
 )
 
 REM Install binary

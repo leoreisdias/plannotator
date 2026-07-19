@@ -415,7 +415,7 @@ if [ "$verify_attestation" -eq 1 ]; then
     fi
 else
     echo "SHA256 verified. For build provenance verification, see"
-    echo "https://plannotator.ai/docs/getting-started/installation/#verifying-your-install"
+    echo "https://docs.plannotator.ai/open-source/start/installation#pin-or-verify-a-release"
 fi
 
 # Remove old binary first (handles Windows .exe and locked file issues)

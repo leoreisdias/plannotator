@@ -341,7 +341,7 @@ if ($verifyAttestationResolved) {
     }
 } else {
     Write-Host "SHA256 verified. For build provenance verification, see"
-    Write-Host "https://plannotator.ai/docs/getting-started/installation/#verifying-your-install"
+    Write-Host "https://docs.plannotator.ai/open-source/start/installation#pin-or-verify-a-release"
 }
 
 Move-Item -Force $tmpFile "$installDir\plannotator.exe"
