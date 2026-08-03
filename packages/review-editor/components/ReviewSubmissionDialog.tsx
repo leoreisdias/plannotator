@@ -62,6 +62,7 @@ interface ReviewSubmissionDialogProps {
   onCancel: () => void;
   isSubmitting: boolean;
   recoveryPersistsRefresh: boolean;
+  confirmLabel?: string;
   mrLabel: string;
   platformLabel: string;
 }
@@ -305,6 +306,7 @@ export function ReviewSubmissionDialog({
   onCancel,
   isSubmitting,
   recoveryPersistsRefresh,
+  confirmLabel,
   mrLabel,
   platformLabel,
 }: ReviewSubmissionDialogProps) {
@@ -544,13 +546,11 @@ export function ReviewSubmissionDialog({
               ? 'Posting...'
               : hasBlocked
                 ? 'Retry blocked'
-              : hasPartial
-                ? 'Retry Unposted'
+                : hasPartial
+                  ? 'Retry Unposted'
                 : hasFailed
                   ? 'Retry Failed'
-                  : isApprove
-                    ? 'Approve'
-                    : 'Post Comments'}
+                  : confirmLabel ?? (isApprove ? 'Approve' : 'Post Comments')}
           </button>
         </div>
       </div>

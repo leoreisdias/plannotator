@@ -47,7 +47,7 @@ import { useAgentJobs, jobMatchesReviewContext } from '@plannotator/ui/hooks/use
 import { exportEditorAnnotations } from '@plannotator/ui/utils/parser';
 import { buildReviewAgentInstructions } from '@plannotator/ui/utils/reviewAgentInstructions';
 import { ResizeHandle } from '@plannotator/ui/components/ResizeHandle';
-import { FolderTree } from 'lucide-react';
+import { ArrowRight, FolderTree } from 'lucide-react';
 import { DockviewReact, type DockviewReadyEvent, type DockviewApi } from 'dockview-react';
 import { ReviewHeaderMenu } from './components/ReviewHeaderMenu';
 import { ReviewSidebar } from './components/ReviewSidebar';
@@ -60,6 +60,7 @@ import { StackedPRLabel } from './components/StackedPRLabel';
 import { PRSelector } from './components/PRSelector';
 import { PRSwitchOverlay } from './components/PRSwitchOverlay';
 import { usePRStack } from './hooks/usePRStack';
+import { useApproveAndNextAffordance } from './hooks/useApproveAndNextAffordance';
 import { useDiffFreshness } from './hooks/useDiffFreshness';
 import { usePRSession, type PRSessionUpdate } from './hooks/usePRSession';
 import { useAnnotationFactory } from './hooks/useAnnotationFactory';
@@ -105,7 +106,7 @@ import { DestinationSpotlight } from './components/DestinationSpotlight';
 import { needsDestinationSpotlight, markDestinationSpotlightSeen } from './utils/destinationSpotlight';
 import { TextShimmer } from '@plannotator/ui/components/TextShimmer';
 import type { PRMetadata } from '@plannotator/shared/pr-types';
-import type { PRDiffScope, PRDiffScopeOption, PRStackInfo, PRStackTree } from '@plannotator/shared/pr-stack';
+import type { PRDiffScope, PRDiffScopeOption, PRStackInfo, PRStackNode, PRStackTree } from '@plannotator/shared/pr-stack';
 import { altKey } from '@plannotator/ui/utils/platform';
 import { TourDialog } from './components/tour/TourDialog';
 import { DEMO_TOUR_ID } from './demoTour';
@@ -399,7 +400,7 @@ const ReviewApp: React.FC = () => {
   const [isPlatformActioning, setIsPlatformActioning] = useState(false);
   const [platformActionError, setPlatformActionError] = useState<string | null>(null);
   const [platformUser, setPlatformUser] = useState<string | null>(null);
-  const [platformCommentDialog, setPlatformCommentDialog] = useState<{ action: 'approve' | 'comment'; plan: ReviewSubmission } | null>(null);
+  const [platformCommentDialog, setPlatformCommentDialog] = useState<{ action: 'approve' | 'comment'; plan: ReviewSubmission; nextPr?: PRStackNode } | null>(null);
   const [platformGeneralComment, setPlatformGeneralComment] = useState('');
   const [platformReviewRecovery, setPlatformReviewRecovery] = useState<{
     rootPrUrl: string;
@@ -444,7 +445,6 @@ const ReviewApp: React.FC = () => {
       return () => clearTimeout(t);
     }
   }, [updateInfo?.updateAvailable, updateInfo?.dismissed]);
-
   const identity = useConfigValue('displayName');
 
   const clearPendingSelection = useCallback(() => {
@@ -595,7 +595,6 @@ const ReviewApp: React.FC = () => {
   }, [annotations, externalAnnotations]);
   const allAnnotationsRef = useRef(allAnnotations);
   allAnnotationsRef.current = allAnnotations;
-
   // Auto-save code annotation drafts
   const { draftBanner, restoreDraft, getDraftGeneration, dismissDraft } = useCodeAnnotationDraft({
     annotations: allAnnotations,
@@ -2612,8 +2611,54 @@ const ReviewApp: React.FC = () => {
     }
   }, [getDraftGeneration]);
 
+  const annotationBelongsToApprovedPR = useCallback((annotation: { prUrl?: string }, approvedPrUrl: string | undefined) => {
+    return !approvedPrUrl || !annotation.prUrl || annotation.prUrl === approvedPrUrl;
+  }, []);
+
+  const clearApprovedPRReviewState = useCallback((approvedPrUrl: string | undefined) => {
+    const externalIds = externalAnnotations
+      .filter(annotation => annotationBelongsToApprovedPR(annotation, approvedPrUrl))
+      .map(annotation => annotation.id);
+
+    dismissDraft();
+    setAnnotations(prev => prev.filter(annotation => !annotationBelongsToApprovedPR(annotation, approvedPrUrl)));
+    setDescriptionAnnotations(prev => prev.filter(annotation => !proseAnnotationMatchesPr(annotation, approvedPrUrl)));
+    setCommentAnnotations(prev => prev.filter(annotation => !proseAnnotationMatchesPr(annotation, approvedPrUrl)));
+    setSelectedAnnotationId(prev => {
+      if (!prev) return prev;
+      const selected = allAnnotationsRef.current.find(annotation => annotation.id === prev);
+      return selected && annotationBelongsToApprovedPR(selected, approvedPrUrl) ? null : prev;
+    });
+    setSelectedDescriptionAnnotationId(prev => {
+      if (!prev) return prev;
+      const selected = descriptionAnnotations.find(annotation => annotation.id === prev);
+      return selected && proseAnnotationMatchesPr(selected, approvedPrUrl) ? null : prev;
+    });
+    setSelectedCommentAnnotationId(prev => {
+      if (!prev) return prev;
+      const selected = commentAnnotations.find(annotation => annotation.id === prev);
+      return selected && proseAnnotationMatchesPr(selected, approvedPrUrl) ? null : prev;
+    });
+
+    for (const id of externalIds) {
+      deleteExternalAnnotation(id);
+    }
+  }, [
+    annotationBelongsToApprovedPR,
+    commentAnnotations,
+    deleteExternalAnnotation,
+    descriptionAnnotations,
+    dismissDraft,
+    externalAnnotations,
+  ]);
+
   // Submit reviews to one or more PRs via /api/pr-action
-  const handlePlatformAction = useCallback(async (action: 'approve' | 'comment', plan: ReviewSubmission, generalComment?: string) => {
+  const handlePlatformAction = useCallback(async (
+    action: 'approve' | 'comment',
+    plan: ReviewSubmission,
+    generalComment?: string,
+    nextPr?: PRStackNode,
+  ) => {
     setIsPlatformActioning(true);
     setPlatformActionError(null);
 
@@ -2677,11 +2722,37 @@ const ReviewApp: React.FC = () => {
       }
 
       setPlatformCommentDialog(null);
-      setSubmitted(action === 'approve' ? 'approved' : 'feedback');
 
       if (platformOpenPR) {
         for (const url of openUrls) window.open(url, '_blank');
       }
+
+      if (action === 'approve' && nextPr?.url) {
+        const nextUrl = nextPr.url;
+        const approvedLabel = mrNumberLabel || mrLabel;
+        const nextLabel = nextPr.number != null ? `${mrLabel} #${nextPr.number}` : nextPr.branch;
+        clearApprovedPRReviewState(prMetadata?.url);
+        toast.success(`${approvedLabel} approved. Moving to ${nextLabel}...`);
+        const switched = await handlePRSwitch(nextUrl);
+        if (!switched) {
+          const message = `${approvedLabel} approved, but Plannotator couldn't open ${nextLabel}.`;
+          setPlatformActionError(message);
+          toast.error(message, {
+            action: {
+              label: 'Retry',
+              onClick: () => {
+                setPlatformActionError(null);
+                void handlePRSwitch(nextUrl).then((ok) => {
+                  if (!ok) setPlatformActionError(message);
+                });
+              },
+            },
+          });
+        }
+        return;
+      }
+
+      setSubmitted(action === 'approve' ? 'approved' : 'feedback');
 
       const agentSwitchSettings = getAgentSwitchSettings('review');
       const effectiveAgent = getEffectiveAgentName(agentSwitchSettings);
@@ -2705,9 +2776,9 @@ const ReviewApp: React.FC = () => {
     } finally {
       setIsPlatformActioning(false);
     }
-  }, [platformOpenPR, platformLabel, mrLabel, prMetadata]);
+  }, [platformOpenPR, platformLabel, mrLabel, mrNumberLabel, prMetadata, handlePRSwitch, clearApprovedPRReviewState]);
 
-  const openPlatformDialog = useCallback((action: 'approve' | 'comment') => {
+  const openPlatformDialog = useCallback((action: 'approve' | 'comment', nextPr?: PRStackNode) => {
     const diffPaths = new Set(files.map(f => f.path));
     const prMeta = prMetadata ? {
       number: prMetadata.platform === 'github' ? prMetadata.number : prMetadata.iid,
@@ -2742,11 +2813,12 @@ const ReviewApp: React.FC = () => {
       setPlatformCommentDialog({
         action: recovery.action,
         plan: restoreReviewSubmission(plan, recovery),
+        ...(nextPr && { nextPr }),
       });
       return;
     }
     setPlatformGeneralComment(seededGeneralComment);
-    setPlatformCommentDialog({ action, plan });
+    setPlatformCommentDialog({ action, plan, ...(nextPr && { nextPr }) });
   }, [allAnnotations, visibleEditorAnnotations, files, prMetadata, visibleDescriptionAnnotations, visibleCommentAnnotations, prContext?.body, platformReviewRecovery]);
 
   // Double-tap Option/Alt to toggle review destination (PR mode only)
@@ -2804,7 +2876,7 @@ const ReviewApp: React.FC = () => {
         const canSubmit = isApproveAction || hasTargets || platformGeneralComment.trim();
         if (!canSubmit || retryBlocked) return;
         e.preventDefault();
-        handlePlatformAction(platformCommentDialog.action, platformCommentDialog.plan, platformGeneralComment);
+        handlePlatformAction(platformCommentDialog.action, platformCommentDialog.plan, platformGeneralComment, platformCommentDialog.nextPr);
         return;
       }
 
@@ -2843,6 +2915,27 @@ const ReviewApp: React.FC = () => {
     origin, platformMode, platformLabel, platformUser, prMetadata, totalAnnotationCount, openPlatformDialog,
     handleApprove, handleSendFeedback, handlePlatformAction
   ]);
+
+  const {
+    isOwnPlatformPR,
+    nextApproveLabel,
+    nextOpenStackNode,
+    platformApproveDisabled,
+    platformApproveGroupClass,
+    platformApproveMuted,
+    platformApproveTitle,
+    showApproveAndNext,
+  } = useApproveAndNextAffordance({
+    isApproving,
+    isPlatformActioning,
+    isSendingFeedback,
+    mrLabel,
+    platformMode,
+    platformUser,
+    prDiffScope,
+    prMetadata,
+    prStackTree,
+  });
 
   if (isLoading) {
     return (
@@ -3184,25 +3277,36 @@ const ReviewApp: React.FC = () => {
                       />
                     )}
                     <div className="relative group/approve">
-                      <ApproveButton
-                        onClick={() => {
-                          if (platformUser && prMetadata?.author === platformUser) return;
-                          openPlatformDialog('approve');
-                        }}
-                        disabled={
-                          isSendingFeedback || isApproving || isPlatformActioning ||
-                          (!!platformUser && prMetadata?.author === platformUser)
-                        }
-                        isLoading={isApproving}
-                        muted={!!platformUser && prMetadata?.author === platformUser && !isSendingFeedback && !isApproving && !isPlatformActioning}
-                        title={
-                          platformUser && prMetadata?.author === platformUser
-                            ? `You can't approve your own ${mrLabel}`
-                            : "Approve - no changes needed"
-                        }
-                        labelBreakpoint="lg"
-                      />
-                      {platformUser && prMetadata?.author === platformUser && (
+                      <div className={platformApproveGroupClass}>
+                        <ApproveButton
+                          onClick={() => {
+                            if (isOwnPlatformPR) return;
+                            openPlatformDialog('approve');
+                          }}
+                          disabled={platformApproveDisabled}
+                          isLoading={isApproving}
+                          muted={platformApproveMuted}
+                          title={platformApproveTitle}
+                          className={showApproveAndNext ? 'rounded-r-none' : undefined}
+                          labelBreakpoint="lg"
+                        />
+                        {showApproveAndNext && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!nextOpenStackNode) return;
+                              openPlatformDialog('approve', nextOpenStackNode);
+                            }}
+                            disabled={platformApproveDisabled}
+                            title={`Approve and review ${nextApproveLabel}`}
+                            aria-label={`Approve and review ${nextApproveLabel}`}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-l-none rounded-r-md border-l border-success-foreground/35 bg-success text-success-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:border-muted-foreground/25 disabled:bg-muted disabled:text-muted-foreground"
+                          >
+                            <ArrowRight className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                      {isOwnPlatformPR && (
                         <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-48 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
                           <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
                           <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />
@@ -3861,11 +3965,12 @@ const ReviewApp: React.FC = () => {
           }}
           onConfirm={() => {
             if (!platformCommentDialog) return;
-            handlePlatformAction(platformCommentDialog.action, platformCommentDialog.plan, platformGeneralComment);
+            handlePlatformAction(platformCommentDialog.action, platformCommentDialog.plan, platformGeneralComment, platformCommentDialog.nextPr);
           }}
           onCancel={() => setPlatformCommentDialog(null)}
           isSubmitting={isPlatformActioning}
           recoveryPersistsRefresh={platformRecoveryPersistsRefresh}
+          confirmLabel={platformCommentDialog?.nextPr ? 'Approve & Next' : undefined}
           mrLabel={mrLabel}
           platformLabel={platformLabel}
         />
