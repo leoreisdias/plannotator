@@ -42,6 +42,10 @@ import {
   useReviewSearch,
   type ReviewSearchMatch,
 } from './hooks/useReviewSearch';
+import {
+  buildExplainFindingRequest,
+  isAgentGeneratedFinding,
+} from './utils/explainFinding';
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
 import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotations';
 import { useAgentJobs, jobMatchesReviewContext } from '@plannotator/ui/hooks/useAgentJobs';
@@ -722,6 +726,7 @@ const ReviewApp: React.FC = () => {
     resetSession: resetAISession,
     sessionId: aiSessionId,
   } = aiChat;
+  const isAILoading = aiIsCreatingSession || aiIsStreaming;
 
   const codeNav = useCodeNav();
 
@@ -823,6 +828,18 @@ const ReviewApp: React.FC = () => {
     if (!file) return;
     handleAskAIForFile(file.path, question);
   }, [activeFileIndex, files, handleAskAIForFile]);
+
+  const handleExplainAnnotation = useCallback((id: string) => {
+    if (!aiAvailable || isAILoading) return;
+    const annotation = allAnnotationsRef.current.find((item) => item.id === id);
+    if (!annotation || !isAgentGeneratedFinding(annotation)) return;
+
+    const file = annotation.filePath
+      ? files.find((item) => item.path === annotation.filePath)
+      : undefined;
+    reviewSidebar.open('ai');
+    void askAI(buildExplainFindingRequest(annotation, file?.patch));
+  }, [aiAvailable, askAI, files, isAILoading]);
 
   const handleViewAIResponse = useCallback((questionId?: string) => {
     reviewSidebar.open('ai');
@@ -2438,6 +2455,7 @@ const ReviewApp: React.FC = () => {
     onSelectAnnotation: handleSelectAnnotation,
     onNavigateToAnnotation: handleNavigateToAnnotation,
     onDeleteAnnotation: handleDeleteAnnotation,
+    onExplainAnnotation: handleExplainAnnotation,
     descriptionAnnotations: visibleDescriptionAnnotations,
     selectedDescriptionAnnotationId,
     onAddDescriptionAnnotation: handleAddDescriptionAnnotation,
@@ -2476,7 +2494,7 @@ const ReviewApp: React.FC = () => {
     aiMessages,
     onAskAI: handleAskAI,
     onAskAIForFile: handleAskAIForFile,
-    isAILoading: aiIsCreatingSession || aiIsStreaming,
+    isAILoading,
     onViewAIResponse: handleViewAIResponse,
     onClickAIMarker: handleClickAIMarker,
     aiHistoryForSelection,
@@ -2524,11 +2542,11 @@ const ReviewApp: React.FC = () => {
     handleSelectCommentAnnotation, handleDeleteCommentAnnotation, handleAskAIForComment, commentScrollTarget,
     selectedAnnotationId, scrollTargetAnnotation, pendingSelection, handleLineSelection,
     handleAddAnnotation, handleAddFileComment, handleAddFileCommentForFile, handleEditAnnotation,
-    handleSelectAnnotation, handleNavigateToAnnotation, handleDeleteAnnotation, viewedFiles,
+    handleSelectAnnotation, handleNavigateToAnnotation, handleDeleteAnnotation, handleExplainAnnotation, viewedFiles,
     handleToggleViewed, stagedFiles, stagingFile, stageFile,
     canStageFiles, isPathStageable, activeWorktreePath, guideRevealFile, handleGuideRevealFile, stageError, isSearchPending, debouncedSearchQuery,
     activeFileSearchMatches, activeSearchMatchId, activeSearchMatch, searchMatches,
-    aiAvailable, aiMessages, aiIsCreatingSession, aiIsStreaming,
+    aiAvailable, aiMessages, isAILoading,
     handleAskAI, handleAskAIForFile, handleViewAIResponse, handleClickAIMarker,
     aiHistoryForSelection, getAIHistoryForFile, agentJobs.jobs, prMetadata, prContext, prArtifacts,
     isPRContextLoading, prContextError, fetchPRContext, platformUser, openDiffFile,
@@ -3769,6 +3787,7 @@ const ReviewApp: React.FC = () => {
                 onSelectAnnotation={handleSelectAnnotation}
                 onNavigateToAnnotation={handleNavigateToAnnotation}
                 onDeleteAnnotation={handleDeleteAnnotation}
+                onExplainAnnotation={aiAvailable ? handleExplainAnnotation : undefined}
                 feedbackMarkdown={feedbackMarkdown}
                 width={panelResize.width}
                 editorAnnotations={visibleEditorAnnotations}
