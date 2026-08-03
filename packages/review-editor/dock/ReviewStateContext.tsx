@@ -189,6 +189,9 @@ export interface ReviewState {
   onSemanticDiffLoadError: () => boolean;
   onSemanticDiffLoadSuccess: () => void;
 
+  snapshotId: string | null;
+  eslintCheckAvailable: boolean;
+
   // Tour
   openTourPanel: (jobId: string) => void;
 

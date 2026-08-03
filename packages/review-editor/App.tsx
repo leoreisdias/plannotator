@@ -15,6 +15,7 @@ import { RepoIcon } from '@plannotator/ui/components/RepoIcon';
 import { PullRequestIcon } from '@plannotator/ui/components/PullRequestIcon';
 import { getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo } from '@plannotator/shared/pr-types';
 import type { SemanticDiffAdvert } from '@plannotator/shared/semantic-diff-types';
+import type { EslintCheckAdvert } from '@plannotator/shared/eslint-check-types';
 import { configStore, useConfigValue, setReviewPanelView } from '@plannotator/ui/config';
 import { loadDiffFont } from '@plannotator/ui/utils/diffFonts';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
@@ -89,6 +90,7 @@ import {
   REVIEW_PR_OVERVIEW_PANEL_ID,
   REVIEW_PR_ARTIFACTS_PANEL_ID,
   REVIEW_SEMANTIC_DIFF_PANEL_ID,
+  REVIEW_ESLINT_CHECK_PANEL_ID,
   REVIEW_ALL_FILES_PANEL_ID,
   REVIEW_CODE_NAV_PANEL_ID,
 } from './dock/reviewPanelTypes';
@@ -149,6 +151,7 @@ interface DiffData {
   prDiffScope?: PRDiffScope;
   prDiffScopeOptions?: PRDiffScopeOption[];
   semanticDiff?: SemanticDiffAdvert;
+  eslintCheck?: EslintCheckAdvert;
 }
 
 function getFileTabTitle(filePath: string): string {
@@ -222,11 +225,20 @@ const ReviewApp: React.FC = () => {
   // on item version bumps) and early-declared callbacks read the CURRENT value
   // at call time instead of a stale closure capture.
   const isAllFilesActiveRef = useRef(isAllFilesActive);
+
   isAllFilesActiveRef.current = isAllFilesActive;
+
   const [isSemanticDiffActive, setIsSemanticDiffActive] = useState(false);
+  const [isEslintCheckActive, setIsEslintCheckActive] = useState(false);
   const [isPROverviewActive, setIsPROverviewActive] = useState(false);
   const [isPRArtifactsActive, setIsPRArtifactsActive] = useState(false);
+
   const [semanticDiffAvailable, setSemanticDiffAvailable] = useState(false);
+
+  const [eslintCheckAdvert, setEslintCheckAdvert] = useState<EslintCheckAdvert>({ available: false });
+  const [showEslintConsent, setShowEslintConsent] = useState(false);
+  const eslintConsentGranted = useRef(false);
+
   const [isDiffPanelActive, setIsDiffPanelActive] = useState(false);
   const [allFilesVisibleFile, setAllFilesVisibleFile] = useState<string | null>(null);
   const [pendingSelection, setPendingSelection] = useState<SelectedLineRange | null>(null);
@@ -903,6 +915,7 @@ const ReviewApp: React.FC = () => {
       if (!panel) {
         setIsAllFilesActive(false);
         setIsSemanticDiffActive(false);
+        setIsEslintCheckActive(false);
         setIsPROverviewActive(false);
         setIsPRArtifactsActive(false);
         setIsDiffPanelActive(false);
@@ -910,6 +923,7 @@ const ReviewApp: React.FC = () => {
       }
       setIsAllFilesActive(panel.id === REVIEW_ALL_FILES_PANEL_ID);
       setIsSemanticDiffActive(panel.id === REVIEW_SEMANTIC_DIFF_PANEL_ID);
+      setIsEslintCheckActive(panel.id === REVIEW_ESLINT_CHECK_PANEL_ID);
       setIsPROverviewActive(panel.id === REVIEW_PR_OVERVIEW_PANEL_ID);
       setIsPRArtifactsActive(panel.id === REVIEW_PR_ARTIFACTS_PANEL_ID);
       setIsDiffPanelActive(isReviewDiffPanelId(panel.id));
@@ -1223,6 +1237,43 @@ const ReviewApp: React.FC = () => {
     }
   }, [dockApi, isSemanticDiffActive, openAllFilesPanel]);
 
+  const openEslintCheckPanel = useCallback(() => {
+    if (!dockApi || !eslintCheckAdvert.available) return;
+
+    const existing = dockApi.getPanel(REVIEW_ESLINT_CHECK_PANEL_ID);
+
+    if (existing) {
+      existing.api.setActive();
+      return;
+    }
+
+    dockApi.addPanel({
+      id: REVIEW_ESLINT_CHECK_PANEL_ID,
+      component: REVIEW_PANEL_TYPES.ESLINT_CHECK,
+      title: 'ESLint',
+    });
+  }, [dockApi, eslintCheckAdvert.available]);
+
+  const requestEslintCheck = useCallback(() => {
+    if (eslintConsentGranted.current) {
+      openEslintCheckPanel();
+      return;
+    }
+
+    setShowEslintConsent(true);
+  }, [openEslintCheckPanel]);
+
+  const applyEslintCheckAdvert = useCallback((advert?: EslintCheckAdvert) => {
+    if (!advert) return;
+
+    setEslintCheckAdvert(advert);
+
+    if (!advert.available) {
+      dockApi?.getPanel(REVIEW_ESLINT_CHECK_PANEL_ID)?.api.close();
+      if (isEslintCheckActive) openAllFilesPanel();
+    }
+  }, [dockApi, isEslintCheckActive, openAllFilesPanel]);
+
   // Open the All files overview on first load. Semantic diff stays available via
   // the file-tree nav entry, but it's no longer the default landing view.
   useEffect(() => {
@@ -1342,6 +1393,7 @@ const ReviewApp: React.FC = () => {
         error?: string;
         isWSL?: boolean;
         semanticDiff?: SemanticDiffAdvert;
+        eslintCheck?: EslintCheckAdvert;
         sections?: SinceBaseSections;
         commitInfo?: CommitDiffInfo;
         baseBehindRemote?: boolean;
@@ -1402,6 +1454,7 @@ const ReviewApp: React.FC = () => {
         if (data.error) setDiffError(data.error);
         if (data.isWSL) setIsWSL(true);
         setSemanticDiffAvailable(data.semanticDiff?.available === true);
+        setEslintCheckAdvert(data.eslintCheck ?? { available: false });
         setSections(data.sections ?? null);
         setCommitInfo(data.commitInfo ?? null);
         setBaseBehindRemote(data.baseBehindRemote === true);
@@ -1735,6 +1788,7 @@ const ReviewApp: React.FC = () => {
     repoInfo?: { display: string; branch?: string };
     viewedFiles?: string[]; error?: string;
     semanticDiff?: SemanticDiffAdvert;
+    eslintCheck?: EslintCheckAdvert;
     agentCwd?: string | null;
   }) {
     const isPRSwitch = !!data.prMetadata;
@@ -1769,6 +1823,7 @@ const ReviewApp: React.FC = () => {
     }
     setDiffError(data.error || null);
     applySemanticDiffAdvert(data.semanticDiff);
+    applyEslintCheckAdvert(data.eslintCheck);
     // The PR's local checkout changes on switch (and warms in later). Use the
     // server's value when present; otherwise clear it on a switch so the Open-in
     // button can't keep pointing at the previous PR's checkout (the 5s freshness
@@ -1822,6 +1877,7 @@ const ReviewApp: React.FC = () => {
         diffOptions?: DiffOption[];
         error?: string;
         semanticDiff?: SemanticDiffAdvert;
+        eslintCheck?: EslintCheckAdvert;
         sections?: SinceBaseSections;
         commitInfo?: CommitDiffInfo;
         baseBehindRemote?: boolean;
@@ -1835,6 +1891,7 @@ const ReviewApp: React.FC = () => {
 
       const nextFiles = orderFilesBySections(parseDiffToFiles(data.rawPatch), data.sections);
       applySemanticDiffAdvert(data.semanticDiff);
+      applyEslintCheckAdvert(data.eslintCheck);
       setSections(data.sections ?? null);
       setCommitInfo(data.commitInfo ?? null);
       setBaseBehindRemote(data.baseBehindRemote === true);
@@ -1914,7 +1971,7 @@ const ReviewApp: React.FC = () => {
     } finally {
       setIsLoadingDiff(false);
     }
-  }, [dockApi, resetStagedFiles, selectedBase, diffHideWhitespace, files, activeFileIndex, openDiffFile, applySemanticDiffAdvert]);
+  }, [dockApi, resetStagedFiles, selectedBase, diffHideWhitespace, files, activeFileIndex, openDiffFile, applySemanticDiffAdvert, applyEslintCheckAdvert]);
 
   // Switch the base branch the current diff compares against.
   // Only triggers a refetch when the active mode actually uses a base.
@@ -2446,6 +2503,10 @@ const ReviewApp: React.FC = () => {
     onSemanticDiffUnavailable: handleSemanticDiffUnavailable,
     onSemanticDiffLoadError: handleSemanticDiffLoadError,
     onSemanticDiffLoadSuccess: handleSemanticDiffLoadSuccess,
+
+    snapshotId: snapshotId ?? null,
+    eslintCheckAvailable: eslintCheckAdvert.available,
+
     openTourPanel: handleOpenTour,
     openGuide: handleOpenGuide,
     onCodeNavRequest: canUseLiveWorkspaceActions ? handleCodeNavRequest : undefined,
@@ -2472,6 +2533,7 @@ const ReviewApp: React.FC = () => {
     aiHistoryForSelection, getAIHistoryForFile, agentJobs.jobs, prMetadata, prContext, prArtifacts,
     isPRContextLoading, prContextError, fetchPRContext, platformUser, openDiffFile,
     handleOpenTour, handleOpenGuide, isAllFilesActive, allFilesOrder, allFilesAllCollapsed, onToggleAllFilesCollapsed, registerAllFilesCollapseToggle, commitInfo, isSemanticDiffActive, semanticDiffAvailable,
+    snapshotId, eslintCheckAdvert.available,
     handleSemanticDiffUnavailable, handleSemanticDiffLoadError, handleSemanticDiffLoadSuccess, handleAddAnnotationForFile,
     handleCodeNavRequest, codeNav.result, codeNav.isLoading, codeNav.activeSymbol,
   ]);
@@ -3423,7 +3485,7 @@ const ReviewApp: React.FC = () => {
                 files={files}
                 sections={sections!}
                 width={fileTreeResize.width}
-                activeFileIndex={isAllFilesActive || isSemanticDiffActive || isPROverviewActive ? -1 : activeFileIndex}
+                activeFileIndex={isAllFilesActive || isSemanticDiffActive || isEslintCheckActive || isPROverviewActive ? -1 : activeFileIndex}
                 scrollHighlightIndex={isAllFilesActive && allFilesVisibleFile ? files.findIndex(f => f.path === allFilesVisibleFile) : undefined}
                 onSelectFile={handleFilePreview}
                 onDoubleClickFile={handleFilePinned}
@@ -3451,6 +3513,11 @@ const ReviewApp: React.FC = () => {
                 onSelectSemanticDiff={() => openSemanticDiffPanel()}
                 isSemanticDiffActive={isSemanticDiffActive}
                 semanticDiffAvailable={semanticDiffAvailable}
+
+                onSelectEslintCheck={eslintCheckAdvert.available ? requestEslintCheck : undefined}
+                isEslintCheckActive={isEslintCheckActive}
+                eslintCheckFileCount={eslintCheckAdvert.fileCount}
+
                 onCopyRawDiff={handleCopyDiff}
                 canCopyRawDiff={!!diffData?.rawPatch}
                 copyRawDiffStatus={copyRawDiffStatus}
@@ -3506,6 +3573,11 @@ const ReviewApp: React.FC = () => {
                 onSelectSemanticDiff={() => openSemanticDiffPanel()}
                 isSemanticDiffActive={isSemanticDiffActive}
                 semanticDiffAvailable={semanticDiffAvailable}
+
+                onSelectEslintCheck={eslintCheckAdvert.available ? requestEslintCheck : undefined}
+                isEslintCheckActive={isEslintCheckActive}
+                eslintCheckFileCount={eslintCheckAdvert.fileCount}
+
                 onSelectAllFiles={openAllFilesPanel}
                 isAllFilesActive={isAllFilesActive}
                 scrollHighlightIndex={isAllFilesActive && allFilesVisibleFile ? files.findIndex(f => f.path === allFilesVisibleFile) : undefined}
@@ -3798,6 +3870,23 @@ const ReviewApp: React.FC = () => {
             }
           />
         </div>
+
+        <ConfirmDialog
+          isOpen={showEslintConsent}
+          onClose={() => setShowEslintConsent(false)}
+          onConfirm={() => {
+            eslintConsentGranted.current = true;
+            setShowEslintConsent(false);
+            openEslintCheckPanel();
+          }}
+          title="Run Project ESLint?"
+          message="This runs the reviewed project's local ESLint configuration and plugins with your user permissions."
+          subMessage="Plannotator checks only supported files in this review, runs ESLint without --fix, and does not install packages or invoke package scripts. Project configuration and plugins are executable code and may still modify files or perform other actions with your user permissions."
+          confirmText="Run ESLint"
+          cancelText="Cancel"
+          variant="warning"
+          showCancel
+        />
 
         {/* Worktree info dialog */}
         {(gitContext?.cwd || agentCwd) && prMetadata && (
