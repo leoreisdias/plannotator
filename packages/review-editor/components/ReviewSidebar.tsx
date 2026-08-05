@@ -35,6 +35,7 @@ interface ReviewSidebarProps {
   onNavigateToAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
   onExplainAnnotation?: (id: string) => void;
+  agentFindingSources: ReadonlySet<string>;
   feedbackMarkdown?: string;
   width?: number;
   editorAnnotations?: EditorAnnotation[];
@@ -141,6 +142,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   onNavigateToAnnotation,
   onDeleteAnnotation,
   onExplainAnnotation,
+  agentFindingSources,
   feedbackMarkdown,
   width,
   editorAnnotations,
@@ -292,7 +294,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
           </div>
         )}
         <CommentActions
-          onExplain={isAgentGeneratedFinding(annotation) && onExplainAnnotation
+          onExplain={isAgentGeneratedFinding(annotation, agentFindingSources) && onExplainAnnotation
             ? () => onExplainAnnotation(annotation.id)
             : undefined}
           explainDisabled={isAICreatingSession || isAIStreaming}
