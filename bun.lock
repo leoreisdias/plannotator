@@ -63,7 +63,7 @@
     },
     "apps/opencode-plugin": {
       "name": "@plannotator/opencode",
-      "version": "0.26.1",
+      "version": "0.26.2",
       "devDependencies": {
         "@opencode-ai/plugin": "0.0.0-next-16775",
         "@plannotator/server": "workspace:*",
@@ -80,11 +80,11 @@
     },
     "apps/pi-extension": {
       "name": "@plannotator/pi-extension",
-      "version": "0.26.1",
+      "version": "0.26.2",
       "dependencies": {
         "@joplin/turndown-plugin-gfm": "^1.0.64",
         "@pierre/diffs": "1.3.2",
-        "@plannotator/webtui": "0.1.0",
+        "@plannotator/webtui": "https://github.com/leoreisdias/webtui/releases/download/canary-2e78ba7/plannotator-webtui-0.1.0-canary.2e78ba7.tgz",
         "chokidar": "^5.0.0",
         "diff": "^8.0.4",
         "parse5": "^7.3.0",
@@ -183,7 +183,7 @@
         "@plannotator/ai": "workspace:*",
         "@plannotator/shared": "workspace:*",
         "@plannotator/ui": "workspace:*",
-        "@plannotator/webtui": "0.1.0",
+        "@plannotator/webtui": "https://github.com/leoreisdias/webtui/releases/download/canary-2e78ba7/plannotator-webtui-0.1.0-canary.2e78ba7.tgz",
         "diff": "^8.0.3",
         "lucide-react": "^1.14.0",
         "react": "^19.2.3",
@@ -218,12 +218,12 @@
     },
     "packages/server": {
       "name": "@plannotator/server",
-      "version": "0.26.1",
+      "version": "0.26.2",
       "dependencies": {
         "@pierre/diffs": "1.3.2",
         "@plannotator/ai": "workspace:*",
         "@plannotator/shared": "workspace:*",
-        "@plannotator/webtui": "0.1.0",
+        "@plannotator/webtui": "https://github.com/leoreisdias/webtui/releases/download/canary-2e78ba7/plannotator-webtui-0.1.0-canary.2e78ba7.tgz",
         "chokidar": "^5.0.0",
         "jsonc-parser": "^3.3.1",
       },
@@ -838,7 +838,7 @@
 
     "@plannotator/web-highlighter": ["@plannotator/web-highlighter@0.8.1", "", {}, "sha512-FlteNOwRj9iNSY/AhFMtqOnVS4FvsACvTw6IiOM1y8iDyhiU/WeZOgjURENvIY+wuUaiS9DDFmg0PrHMyuMR1Q=="],
 
-    "@plannotator/webtui": ["@plannotator/webtui@0.1.0", "", { "dependencies": { "@xterm/addon-fit": "0.12.0-beta.216", "@xterm/addon-unicode11": "0.10.0-beta.216", "@xterm/addon-web-links": "0.13.0-beta.216", "@xterm/addon-webgl": "0.20.0-beta.215", "@xterm/xterm": "6.1.0-beta.216", "lucide-react": "^0.577.0", "node-pty": "^1.1.0", "ws": "^8.20.0" }, "peerDependencies": { "react": "^18.3.0 || ^19.0.0", "react-dom": "^18.3.0 || ^19.0.0" } }, "sha512-pwJfFg5VXOwucs55K6mef5fgK5eC8mJrFYc8RJdvB/T00alwnzgDjT/BAsarPiMj4U3NjUZImzxnbypJsn/ESA=="],
+    "@plannotator/webtui": ["@plannotator/webtui@https://github.com/leoreisdias/webtui/releases/download/canary-2e78ba7/plannotator-webtui-0.1.0-canary.2e78ba7.tgz", { "dependencies": { "@xterm/addon-fit": "0.12.0-beta.216", "@xterm/addon-unicode11": "0.10.0-beta.216", "@xterm/addon-web-links": "0.13.0-beta.216", "@xterm/addon-webgl": "0.20.0-beta.215", "@xterm/xterm": "6.1.0-beta.216", "lucide-react": "^0.577.0", "node-pty": "^1.1.0", "ws": "^8.20.0" }, "peerDependencies": { "react": "^18.3.0 || ^19.0.0", "react-dom": "^18.3.0 || ^19.0.0" } }, "sha512-Ebk5Z7Y0qdgfHIn4xDFqze3wlN7hmLcMxEkpXCmOP0PokXToHLwdzGhw85sLAgh2M8d5ApVV6kK8xzInH5CD/g=="],
 
     "@protobufjs/aspromise": ["@protobufjs/aspromise@1.1.2", "", {}, "sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ=="],
 

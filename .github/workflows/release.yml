@@ -224,7 +224,7 @@ jobs:
               exit 1
             fi
 
-            local runtime_dir="${data_dir}/vendor/agent-terminal/webtui-0.1.0"
+            local runtime_dir="${data_dir}/vendor/agent-terminal/webtui-0.1.0-canary.2e78ba7"
             local smoke_script="${runtime_dir}/terminal-smoke.mjs"
             cat > "$smoke_script" <<'NODE'
           import WebSocket from "ws";
@@ -402,7 +402,7 @@ jobs:
                 throw "FAIL: plannotator annotate terminal did not respond on :$Port/api/plan"
               }
 
-              $runtimeDir = Join-Path $dataDir "vendor\agent-terminal\webtui-0.1.0"
+              $runtimeDir = Join-Path $dataDir "vendor\agent-terminal\webtui-0.1.0-canary.2e78ba7"
               $smokeScript = Join-Path $runtimeDir "terminal-smoke.mjs"
               Set-Content -Path $smokeScript -Encoding UTF8 -Value @'
           import WebSocket from "ws";
