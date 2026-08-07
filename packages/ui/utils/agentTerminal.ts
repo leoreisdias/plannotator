@@ -1,17 +1,17 @@
 import type { AgentTerminalAgent } from "@plannotator/core/agent-terminal";
-import { storage } from "./storage";
+import { storage } from "@plannotator/ui/utils/storage";
 
 const DEFAULT_AGENT_KEY = "plannotator-annotate-agent-terminal-default";
 
-export function getSavedAnnotateAgentId(): string | null {
+export function getSavedAgentTerminalAgentId(): string | null {
   return storage.getItem(DEFAULT_AGENT_KEY);
 }
 
-export function saveAnnotateAgentId(agentId: string): void {
+export function saveAgentTerminalAgentId(agentId: string): void {
   storage.setItem(DEFAULT_AGENT_KEY, agentId);
 }
 
-export function resolveAnnotateAgentId(
+export function resolveAgentTerminalAgentId(
   agents: AgentTerminalAgent[],
   savedAgentId: string | null,
 ): string {

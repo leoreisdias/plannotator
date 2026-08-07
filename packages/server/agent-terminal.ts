@@ -36,8 +36,10 @@ export type BunAgentTerminalBridge = {
 
 export async function createBunAgentTerminalBridge(args: {
   enabled: boolean;
-  cwd: string;
+  cwd: string | (() => string);
 }): Promise<BunAgentTerminalBridge> {
+  const configuredCwd = args.cwd;
+  const getCwd = typeof configuredCwd === "function" ? configuredCwd : () => configuredCwd;
   if (!args.enabled) {
     return createDisabledBridge({
       enabled: false,
@@ -82,7 +84,7 @@ export async function createBunAgentTerminalBridge(args: {
   let sidecarPromise: Promise<NodeAgentTerminalSidecar> | null = null;
   const capability: AgentTerminalCapability = {
     enabled: true,
-    cwd: args.cwd,
+    cwd: getCwd(),
     wsPath,
     agents: listAgents(core),
   };
@@ -186,7 +188,7 @@ export async function createBunAgentTerminalBridge(args: {
     if (sidecar) return Promise.resolve(sidecar);
     if (!sidecarPromise) {
       let promise: Promise<NodeAgentTerminalSidecar>;
-      promise = startNodeAgentTerminalSidecar(args.cwd, resolvedRuntime, wsPath).then((activeSidecar) => {
+      promise = startNodeAgentTerminalSidecar(getCwd(), resolvedRuntime, wsPath).then((activeSidecar) => {
         if (disposed) {
           activeSidecar.dispose();
           throw new Error("Agent terminal bridge was disposed.");

@@ -7,10 +7,12 @@ import React, {
   useRef,
   useState,
 } from "react";
+import "@plannotator/webtui/styles.css";
+import "./agent-terminal.css";
 import type {
   AgentTerminalAgent,
   AgentTerminalCapability,
-} from "@plannotator/shared/agent-terminal";
+} from "@plannotator/core/agent-terminal";
 import {
   Popover,
   PopoverContent,
@@ -23,11 +25,11 @@ import {
   DropdownMenuTrigger,
 } from "@plannotator/ui/components/ui/dropdown-menu";
 import {
-  getSavedAnnotateAgentId,
+  getSavedAgentTerminalAgentId,
   resolveAgentTerminalWebSocketUrl,
-  resolveAnnotateAgentId,
-  saveAnnotateAgentId,
-} from "@plannotator/ui/utils/annotateAgentTerminal";
+  resolveAgentTerminalAgentId,
+  saveAgentTerminalAgentId,
+} from "@plannotator/ui/utils/agentTerminal";
 import { getItem, setItem } from "@plannotator/ui/utils/storage";
 import { WebSocketPtyBackend } from "@plannotator/webtui/browser";
 import { WebTuiTerminal } from "@plannotator/webtui/react";
@@ -42,9 +44,9 @@ import {
   RotateCcw,
   Settings as SettingsIcon,
 } from "lucide-react";
-import { useAnnotateAgentTerminalTheme } from "./annotateAgentTerminalTheme";
+import { useAgentTerminalTheme } from "@plannotator/ui/hooks/useAgentTerminalTheme";
 
-export type AnnotateAgentTerminalPanelHandle = {
+export type AgentTerminalPanelHandle = {
   stop(): void;
   sendMessage(message: string): boolean;
 };
@@ -60,7 +62,7 @@ type AgentTerminalDisplaySettings = {
   lineHeight: number;
 };
 
-interface AnnotateAgentTerminalPanelProps {
+interface AgentTerminalPanelProps {
   capability: AgentTerminalCapability;
   width: number | string;
   onSessionActiveChange?: (active: boolean) => void;
@@ -118,10 +120,10 @@ const AGENT_TERMINAL_FONT_ZOOM = {
   defaultSize: DEFAULT_DISPLAY_SETTINGS.fontSize,
 };
 
-export const AnnotateAgentTerminalPanel = forwardRef<
-  AnnotateAgentTerminalPanelHandle,
-  AnnotateAgentTerminalPanelProps
->(function AnnotateAgentTerminalPanel({ capability, width, onSessionActiveChange, onSessionReadyChange, onClose }, ref) {
+export const AgentTerminalPanel = forwardRef<
+  AgentTerminalPanelHandle,
+  AgentTerminalPanelProps
+>(function AgentTerminalPanel({ capability, width, onSessionActiveChange, onSessionReadyChange, onClose }, ref) {
   const agents = capability.enabled ? capability.agents : [];
   const availableAgents = useMemo(
     () => agents.filter((agent) => agent.available),
@@ -135,12 +137,12 @@ export const AnnotateAgentTerminalPanel = forwardRef<
     [wsUrl],
   );
   const initialAgentId = useMemo(
-    () => resolveAnnotateAgentId(agents, getSavedAnnotateAgentId()),
+    () => resolveAgentTerminalAgentId(agents, getSavedAgentTerminalAgentId()),
     [agents],
   );
   const [selectedAgentId, setSelectedAgentId] = useState(initialAgentId);
   const [saveAsDefault, setSaveAsDefault] = useState(
-    () => getSavedAnnotateAgentId() === initialAgentId,
+    () => getSavedAgentTerminalAgentId() === initialAgentId,
   );
   const [startedAgentId, setStartedAgentId] = useState<string | null>(null);
   const [status, setStatus] = useState<TerminalStatus>("idle");
@@ -150,7 +152,7 @@ export const AnnotateAgentTerminalPanel = forwardRef<
   const closeAfterStopRef = useRef(false);
   const stopRequestedRef = useRef(false);
   const timersRef = useRef<number[]>([]);
-  const terminalTheme = useAnnotateAgentTerminalTheme();
+  const terminalTheme = useAgentTerminalTheme();
 
   useEffect(() => {
     setSelectedAgentId((current) => {
@@ -237,7 +239,7 @@ export const AnnotateAgentTerminalPanel = forwardRef<
 
   const handleStart = useCallback(() => {
     if (!canStart || !selectedAgent) return;
-    if (saveAsDefault) saveAnnotateAgentId(selectedAgent.id);
+    if (saveAsDefault) saveAgentTerminalAgentId(selectedAgent.id);
     stopRequestedRef.current = false;
     closeAfterStopRef.current = false;
     setExitLabel(null);
@@ -306,9 +308,11 @@ export const AnnotateAgentTerminalPanel = forwardRef<
     setStatus("exited");
   }, [clearTimers, onClose, onSessionActiveChange, onSessionReadyChange]);
 
+  const unavailableMessage = "message" in capability ? capability.message : null;
+
   return (
     <aside
-      data-annotate-agent-terminal="true"
+      data-agent-terminal="true"
       className="hidden lg:flex h-full flex-shrink-0 flex-col border-r border-border bg-card"
       style={{ width }}
     >
@@ -316,7 +320,7 @@ export const AnnotateAgentTerminalPanel = forwardRef<
         <div className="flex flex-1 flex-col justify-center gap-2 px-4 text-center">
           <p className="text-xs font-medium text-foreground">Agent unavailable</p>
           <p className="text-[11px] leading-5 text-muted-foreground">
-            {capability.message ?? "WebTUI is not available in this session."}
+            {unavailableMessage ?? "WebTUI is not available in this session."}
           </p>
         </div>
       ) : startedAgentId && backend ? (

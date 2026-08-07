@@ -4,19 +4,19 @@ import { BUILT_IN_THEMES } from "@plannotator/ui/utils/themeRegistry";
 import type { CreateAgentTerminalSessionOptions } from "@plannotator/webtui/browser";
 
 type TerminalOptions = NonNullable<CreateAgentTerminalSessionOptions["terminalOptions"]>;
-export type AnnotateAgentTerminalTheme = NonNullable<TerminalOptions["theme"]>;
+export type AgentTerminalTheme = NonNullable<TerminalOptions["theme"]>;
 
-export type AnnotateAgentTerminalShellStyle = CSSProperties & {
+export type AgentTerminalShellStyle = CSSProperties & {
   "--webtui-background": string;
   "--webtui-foreground": string;
   "--webtui-border": string;
 };
 
-export interface AnnotateAgentTerminalThemeState {
-  theme: AnnotateAgentTerminalTheme;
+export interface AgentTerminalThemeState {
+  theme: AgentTerminalTheme;
   terminalOptions: TerminalOptions;
   colorScheme: "dark" | "light";
-  shellStyle: AnnotateAgentTerminalShellStyle;
+  shellStyle: AgentTerminalShellStyle;
 }
 
 type TerminalThemeMode = "dark" | "light";
@@ -36,7 +36,7 @@ type ResolvedTerminalPalette = {
   warning: string;
   focus: string;
   fontMono: string;
-  terminalTheme?: AnnotateAgentTerminalTheme;
+  terminalTheme?: AgentTerminalTheme;
 };
 
 type ResolvedTerminalPaletteColorKey = Exclude<keyof ResolvedTerminalPalette, "terminalTheme">;
@@ -44,7 +44,7 @@ type ResolvedTerminalPaletteColorKey = Exclude<keyof ResolvedTerminalPalette, "t
 const FALLBACK_MONO_FONT =
   '"SF Mono", "Menlo", "Monaco", "Cascadia Mono", "Consolas", ui-monospace, monospace';
 
-const PLANNOTATOR_DARK_TERMINAL_THEME: AnnotateAgentTerminalTheme = {
+const PLANNOTATOR_DARK_TERMINAL_THEME: AgentTerminalTheme = {
   background: "#11131d",
   foreground: "#e8e6f0",
   cursor: "#c084fc",
@@ -70,7 +70,7 @@ const PLANNOTATOR_DARK_TERMINAL_THEME: AnnotateAgentTerminalTheme = {
   brightWhite: "#fbf7ff",
 };
 
-const PLANNOTATOR_LIGHT_TERMINAL_THEME: AnnotateAgentTerminalTheme = {
+const PLANNOTATOR_LIGHT_TERMINAL_THEME: AgentTerminalTheme = {
   background: "#f6f5fb",
   foreground: "#29263a",
   cursor: "#7c3aed",
@@ -98,7 +98,7 @@ const PLANNOTATOR_LIGHT_TERMINAL_THEME: AnnotateAgentTerminalTheme = {
 
 // Browser sessions read Plannotator's live CSS variables. These presets are only
 // fallback data for non-DOM startup paths where computed CSS is unavailable.
-const TERMINAL_THEME_PRESETS: Record<string, Partial<Record<TerminalThemeMode, AnnotateAgentTerminalTheme>>> = {
+const TERMINAL_THEME_PRESETS: Record<string, Partial<Record<TerminalThemeMode, AgentTerminalTheme>>> = {
   plannotator: {
     dark: PLANNOTATOR_DARK_TERMINAL_THEME,
     light: PLANNOTATOR_LIGHT_TERMINAL_THEME,
@@ -503,9 +503,9 @@ for (const themeId of ["everforest", "everforest-hard", "everforest-soft"]) {
   };
 }
 
-export function useAnnotateAgentTerminalTheme(): AnnotateAgentTerminalThemeState {
+export function useAgentTerminalTheme(): AgentTerminalThemeState {
   const { colorTheme, resolvedMode } = useTheme();
-  const terminalMode = resolveActiveAnnotateAgentTerminalMode(colorTheme, resolvedMode);
+  const terminalMode = resolveActiveAgentTerminalMode(colorTheme, resolvedMode);
   const [palette, setPalette] = useState<ResolvedTerminalPalette>(() =>
     readResolvedTerminalPalette(terminalMode, colorTheme),
   );
@@ -518,7 +518,7 @@ export function useAnnotateAgentTerminalTheme(): AnnotateAgentTerminalThemeState
   }, [colorTheme, terminalMode]);
 
   return useMemo(() => {
-    const theme = resolveAnnotateAgentTerminalTheme(colorTheme, terminalMode, palette);
+    const theme = resolveAgentTerminalTheme(colorTheme, terminalMode, palette);
     return {
       theme,
       terminalOptions: {
@@ -539,7 +539,7 @@ export function useAnnotateAgentTerminalTheme(): AnnotateAgentTerminalThemeState
   }, [colorTheme, palette, terminalMode]);
 }
 
-export function resolveAnnotateAgentTerminalMode(
+export function resolveAgentTerminalMode(
   colorTheme: string,
   requestedMode: TerminalThemeMode,
 ): TerminalThemeMode {
@@ -549,28 +549,28 @@ export function resolveAnnotateAgentTerminalMode(
   return requestedMode;
 }
 
-export function resolveAnnotateAgentTerminalTheme(
+export function resolveAgentTerminalTheme(
   _colorTheme: string,
   mode: TerminalThemeMode,
   palette: ResolvedTerminalPalette,
-): AnnotateAgentTerminalTheme {
-  return palette.terminalTheme ?? buildAnnotateAgentTerminalTheme(palette, mode);
+): AgentTerminalTheme {
+  return palette.terminalTheme ?? buildAgentTerminalTheme(palette, mode);
 }
 
-function resolveActiveAnnotateAgentTerminalMode(
+function resolveActiveAgentTerminalMode(
   colorTheme: string,
   resolvedMode: TerminalThemeMode,
 ): TerminalThemeMode {
   const domMode = typeof document !== "undefined"
     ? (document.documentElement.classList.contains("light") ? "light" : "dark")
     : resolvedMode;
-  return resolveAnnotateAgentTerminalMode(colorTheme, domMode);
+  return resolveAgentTerminalMode(colorTheme, domMode);
 }
 
-export function buildAnnotateAgentTerminalTheme(
+export function buildAgentTerminalTheme(
   palette: ResolvedTerminalPalette,
   mode: TerminalThemeMode,
-): AnnotateAgentTerminalTheme {
+): AgentTerminalTheme {
   const brightTarget = mode === "light" ? "black" : "white";
   const brightMix = mode === "light" ? "84%" : "78%";
   const black = mode === "light" ? palette.foreground : palette.background;
@@ -661,7 +661,7 @@ function readResolvedTerminalPalette(
       fontMono: style.getPropertyValue("--font-mono").trim() || FALLBACK_MONO_FONT,
     };
 
-    const derivedTheme = buildAnnotateAgentTerminalTheme(resolvedPalette, mode);
+    const derivedTheme = buildAgentTerminalTheme(resolvedPalette, mode);
     const readTerminalColor = (
       cssVar: string,
       fallback: string | undefined,

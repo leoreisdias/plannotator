@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
-  buildAnnotateAgentTerminalTheme,
-  resolveAnnotateAgentTerminalMode,
-  resolveAnnotateAgentTerminalTheme,
-} from "./annotateAgentTerminalTheme";
+  buildAgentTerminalTheme,
+  resolveAgentTerminalMode,
+  resolveAgentTerminalTheme,
+} from "@plannotator/ui/hooks/useAgentTerminalTheme";
 
 const palette = {
   background: "rgb(40, 44, 52)",
@@ -22,9 +22,9 @@ const palette = {
   fontMono: "ui-monospace",
 };
 
-describe("buildAnnotateAgentTerminalTheme", () => {
+describe("buildAgentTerminalTheme", () => {
   test("uses a dark terminal buffer with theme accents", () => {
-    const theme = buildAnnotateAgentTerminalTheme(palette, "dark");
+    const theme = buildAgentTerminalTheme(palette, "dark");
 
     expect(theme.background).toBe(palette.background);
     expect(theme.foreground).toBe(palette.foreground);
@@ -36,9 +36,9 @@ describe("buildAnnotateAgentTerminalTheme", () => {
   });
 });
 
-describe("resolveAnnotateAgentTerminalTheme", () => {
+describe("resolveAgentTerminalTheme", () => {
   test("uses the active Plannotator palette instead of a separate terminal preset", () => {
-    const theme = resolveAnnotateAgentTerminalTheme("plannotator", "dark", palette);
+    const theme = resolveAgentTerminalTheme("plannotator", "dark", palette);
 
     expect(theme.background).toBe(palette.background);
     expect(theme.background).not.toBe("#282c34");
@@ -48,7 +48,7 @@ describe("resolveAnnotateAgentTerminalTheme", () => {
   });
 
   test("does not let curated terminal presets override the active app palette", () => {
-    const theme = resolveAnnotateAgentTerminalTheme("catppuccin", "dark", palette);
+    const theme = resolveAgentTerminalTheme("catppuccin", "dark", palette);
 
     expect(theme.background).toBe(palette.background);
     expect(theme.foreground).toBe(palette.foreground);
@@ -62,7 +62,7 @@ describe("resolveAnnotateAgentTerminalTheme", () => {
       foreground: "rgb(87, 82, 121)",
       primary: "rgb(144, 122, 169)",
     };
-    const theme = resolveAnnotateAgentTerminalTheme("rose-pine", "light", lightPalette);
+    const theme = resolveAgentTerminalTheme("rose-pine", "light", lightPalette);
 
     expect(theme.background).toBe(lightPalette.background);
     expect(theme.background).not.toBe("#191724");
@@ -71,6 +71,6 @@ describe("resolveAnnotateAgentTerminalTheme", () => {
   });
 
   test("keeps dark-only app themes in dark terminal mode", () => {
-    expect(resolveAnnotateAgentTerminalMode("dracula", "light")).toBe("dark");
+    expect(resolveAgentTerminalMode("dracula", "light")).toBe("dark");
   });
 });

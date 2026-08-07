@@ -79,6 +79,7 @@ import { createEditorAnnotationHandler } from "./annotations.ts";
 import { createAgentJobHandler, whichCmd as commandExists } from "./agent-jobs.ts";
 import { type AgentJobInfo, REVIEW_OUTPUT_FAILED, getAgentJobAnnotationContext, markJobReviewFailed } from "../generated/agent-jobs.ts";
 import { createExternalAnnotationHandler } from "./external-annotations.ts";
+import { createNodeAgentTerminalBridge } from "./agent-terminal.ts";
 import {
 	handleDraftRequest,
 	handleFavicon,
@@ -1379,6 +1380,7 @@ export async function startReviewServer(options: {
 	});
 
 	const aiRuntime = aiEnabled ? await createPiAIRuntime({ getCwd: resolveAgentCwd }) : null;
+	let agentTerminal: Awaited<ReturnType<typeof createNodeAgentTerminalBridge>> | null = null;
 
 	const server = createServer(async (req, res) => {
 		const url = requestUrl(req);
@@ -1597,6 +1599,9 @@ export async function startReviewServer(options: {
 				...(servedError && { error: servedError }),
 				semanticDiff: await getSemanticDiffAdvert(servedDiffType as DiffType),
 				serverConfig: getServerConfig(gitUser),
+				agentTerminal: agentTerminal?.capability.enabled
+					? { ...agentTerminal.capability, cwd: resolveAgentCwd() }
+					: agentTerminal?.capability,
 			});
 		} else if (url.pathname === "/api/fetch-base" && req.method === "POST") {
 			// Fetch the remote default branch so the local baseline catches up
@@ -2742,6 +2747,12 @@ export async function startReviewServer(options: {
 		}
 	});
 
+	agentTerminal = await createNodeAgentTerminalBridge({
+		enabled: true,
+		cwd: resolveAgentCwd,
+		server,
+	});
+
 	const { port, portSource } = await listenOnPort(server);
 	serverUrl = `http://localhost:${port}`;
 	const exitHandler = () => agentJobs.killAll();
@@ -2763,6 +2774,7 @@ export async function startReviewServer(options: {
 				process.removeListener("exit", exitHandler);
 				agentJobs.killAll();
 				aiRuntime?.dispose();
+				agentTerminal?.dispose();
 			} finally {
 				server.close();
 				// close() only stops the listener; drain browser keep-alive sockets so a

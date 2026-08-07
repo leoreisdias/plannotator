@@ -70,6 +70,7 @@
     "@plannotator/atomic-editor": "^0.8.0",
     "@plannotator/core": "workspace:*",
     "@plannotator/markdown-editor": "^0.4.0",
+    "@plannotator/webtui": "0.1.0",
     "@plannotator/web-highlighter": "^0.8.1",
     "@tanstack/react-table": "^8.21.3",
     "@viz-js/viz": "^3.25.0",

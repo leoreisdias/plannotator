@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentTerminalAgent } from "@plannotator/core/agent-terminal";
-import { resolveAnnotateAgentId } from "./annotateAgentTerminal";
+import { resolveAgentTerminalAgentId } from "./agentTerminal";
 
 const agents: AgentTerminalAgent[] = [
   { id: "claude", name: "Claude", available: true },
@@ -8,18 +8,18 @@ const agents: AgentTerminalAgent[] = [
   { id: "codex", name: "Codex", available: true },
 ];
 
-describe("resolveAnnotateAgentId", () => {
+describe("resolveAgentTerminalAgentId", () => {
   test("keeps a saved available agent", () => {
-    expect(resolveAnnotateAgentId(agents, "codex")).toBe("codex");
+    expect(resolveAgentTerminalAgentId(agents, "codex")).toBe("codex");
   });
 
   test("skips a saved unavailable agent", () => {
-    expect(resolveAnnotateAgentId(agents, "opencode")).toBe("claude");
+    expect(resolveAgentTerminalAgentId(agents, "opencode")).toBe("claude");
   });
 
   test("returns empty when no agents are available", () => {
     expect(
-      resolveAnnotateAgentId(
+      resolveAgentTerminalAgentId(
         agents.map((agent) => ({ ...agent, available: false })),
         "claude",
       ),

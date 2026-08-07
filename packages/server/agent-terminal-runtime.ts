@@ -87,7 +87,7 @@ export async function resolveAgentTerminalRuntime(): Promise<ResolvedAgentTermin
     return {
       ok: false,
       reason: "pty-unavailable",
-      message: "Node.js 20 or newer is required for the annotate agent terminal.",
+      message: "Node.js 20 or newer is required for the agent terminal.",
     };
   }
 
@@ -303,7 +303,7 @@ async function checkNodeVersion(nodePath: string): Promise<{ ok: true } | Unreso
   return {
     ok: false,
     reason: "pty-unavailable",
-    message: `Node.js 20 or newer is required for the annotate agent terminal (${summarizeCommandFailure(result)}).`,
+    message: `Node.js 20 or newer is required for the agent terminal (${summarizeCommandFailure(result)}).`,
   };
 }
 

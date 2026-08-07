@@ -22,9 +22,11 @@ export type NodeAgentTerminalBridge = {
 
 export async function createNodeAgentTerminalBridge(args: {
 	enabled: boolean;
-	cwd: string;
+	cwd: string | (() => string);
 	server: HttpServer;
 }): Promise<NodeAgentTerminalBridge> {
+	const configuredCwd = args.cwd;
+	const getCwd = typeof configuredCwd === "function" ? configuredCwd : () => configuredCwd;
 	if (!args.enabled) {
 		return createDisabledBridge({
 			enabled: false,
@@ -75,7 +77,7 @@ export async function createNodeAgentTerminalBridge(args: {
 			if (spawnInFlight || sessions.size > 0) {
 				throw new Error("An agent terminal is already running.");
 			}
-			const normalized = normalizeSpawnOptions(options, args.cwd, allowedAgents, core.buildAgentLaunchPlan);
+			const normalized = normalizeSpawnOptions(options, getCwd(), allowedAgents, core.buildAgentLaunchPlan);
 			if (!normalized.ok) throw new Error(normalized.message);
 			spawnInFlight = true;
 			try {
@@ -97,7 +99,7 @@ export async function createNodeAgentTerminalBridge(args: {
 	return {
 		capability: {
 			enabled: true,
-			cwd: args.cwd,
+			cwd: getCwd(),
 			wsPath,
 			agents: listAgents(core),
 		},

@@ -48,8 +48,15 @@ import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotat
 import { useAgentJobs, jobMatchesReviewContext } from '@plannotator/ui/hooks/useAgentJobs';
 import { exportEditorAnnotations } from '@plannotator/ui/utils/parser';
 import { buildReviewAgentInstructions } from '@plannotator/ui/utils/reviewAgentInstructions';
+import type { AskAIParams } from '@plannotator/ui/hooks/useAIChat';
+import type { AIProviderOption } from '@plannotator/ui/utils/aiProvider';
 import { ResizeHandle } from '@plannotator/ui/components/ResizeHandle';
-import { FolderTree } from 'lucide-react';
+import { FolderTree, SquareTerminal } from 'lucide-react';
+import {
+  AgentTerminalPanel,
+  type AgentTerminalPanelHandle,
+} from '@plannotator/ui/components/AgentTerminalPanel';
+import type { AgentTerminalCapability } from '@plannotator/shared/agent-terminal';
 import { DockviewReact, type DockviewReadyEvent, type DockviewApi } from 'dockview-react';
 import { ReviewHeaderMenu } from './components/ReviewHeaderMenu';
 import { ReviewSidebar } from './components/ReviewSidebar';
@@ -132,6 +139,8 @@ import {
   type ReviewSubmissionRecovery,
   type ReviewRecoveryStorage,
 } from './utils/reviewSubmissionRecovery';
+import { buildReviewAgentTerminalPrompt } from './utils/agentTerminalPrompt';
+import { routeReviewAIRequest } from './utils/agentTerminalRouting';
 
 declare const __APP_VERSION__: string;
 
@@ -158,6 +167,7 @@ interface DiffData {
   prDiffScope?: PRDiffScope;
   prDiffScopeOptions?: PRDiffScopeOption[];
   semanticDiff?: SemanticDiffAdvert;
+  agentTerminal?: AgentTerminalCapability;
 }
 
 function getFileTabTitle(filePath: string): string {
@@ -279,6 +289,11 @@ const ReviewApp: React.FC = () => {
 
   const reviewSidebar = useSidebar<ReviewSidebarTab>(false, 'annotations');
   const [isFileTreeOpen, setIsFileTreeOpen] = useState(true);
+  const [agentTerminalCapability, setAgentTerminalCapability] = useState<AgentTerminalCapability | null>(null);
+  const [isAgentTerminalOpen, setIsAgentTerminalOpen] = useState(false);
+  const [isAgentTerminalRunning, setIsAgentTerminalRunning] = useState(false);
+  const [isAgentTerminalReady, setIsAgentTerminalReady] = useState(false);
+  const agentTerminalRef = useRef<AgentTerminalPanelHandle>(null);
   // Guided Review screen takeover — file tree + center dock hidden (dock stays
   // mounted, just CSS-hidden; see the dock wrapper below), right sidebar untouched.
   const [guideOpen, setGuideOpen] = useState(false);
@@ -745,6 +760,62 @@ const ReviewApp: React.FC = () => {
     resetSession: resetAISession,
     sessionId: aiSessionId,
   } = aiChat;
+  const canUseAskAI = aiAvailable || isAgentTerminalReady;
+  const visibleAIMessages = isAgentTerminalReady ? [] : aiMessages;
+  const visibleAIProviders = useMemo<AIProviderOption[]>(
+    () => isAgentTerminalReady ? [{ id: 'agent-terminal', name: 'Agent terminal' }] : aiProviders,
+    [aiProviders, isAgentTerminalReady],
+  );
+  const visibleAIConfig = isAgentTerminalReady
+    ? { providerId: 'agent-terminal', model: null, reasoningEffort: null }
+    : aiConfig;
+
+  const sendToAgentTerminal = useCallback((message: string) => {
+    const sent = agentTerminalRef.current?.sendMessage(message) ?? false;
+    if (!sent) return false;
+    setIsAgentTerminalOpen(true);
+    return true;
+  }, []);
+
+  const askReviewAI = useCallback((request: AskAIParams): boolean => {
+    const terminalPrompt = buildReviewAgentTerminalPrompt({
+      question: request.prompt,
+      reviewContext: diffData?.aiReviewContext,
+      diffType,
+      base: committedBase,
+      scope: {
+        label: request.scope?.label,
+        text: request.scope?.text,
+        filePath: request.filePath,
+        lineStart: request.lineStart,
+        lineEnd: request.lineEnd,
+        side: request.side,
+        selectedCode: request.selectedCode,
+      },
+    });
+    const route = routeReviewAIRequest({
+      terminalReady: isAgentTerminalReady,
+      terminalPrompt,
+      sendToTerminal: sendToAgentTerminal,
+      aiAvailable,
+      providerRequest: request,
+      sendToProvider: askAI,
+    });
+
+    if (route === 'provider-fallback' || route === 'terminal-unavailable') {
+      setIsAgentTerminalReady(false);
+    }
+    if (route === 'provider-fallback') {
+      toast.error('Agent terminal is not ready. Falling back to Ask AI.');
+    }
+    if (route === 'terminal-unavailable') {
+      toast.error('Agent terminal is not ready');
+    }
+    if (route === 'unavailable') {
+      toast.error('Ask AI is unavailable');
+    }
+    return route !== 'terminal-unavailable' && route !== 'unavailable';
+  }, [aiAvailable, askAI, committedBase, diffData?.aiReviewContext, diffType, isAgentTerminalReady, sendToAgentTerminal]);
 
   const codeNav = useCodeNav();
 
@@ -830,7 +901,7 @@ const ReviewApp: React.FC = () => {
     const side = pendingSelection.side === 'additions' ? 'new' : 'old';
     const selectedCode = extractLinesFromPatch(file.patch, lineStart, lineEnd, side);
 
-    askAI({
+    askReviewAI({
       prompt: question,
       filePath,
       lineStart,
@@ -838,7 +909,7 @@ const ReviewApp: React.FC = () => {
       side,
       selectedCode: selectedCode || undefined,
     });
-  }, [askAI, files, pendingSelection]);
+  }, [askReviewAI, files, pendingSelection]);
 
   // Single-file surface: the focused file IS files[activeFileIndex].
   const handleAskAI = useCallback((question: string) => {
@@ -884,13 +955,13 @@ const ReviewApp: React.FC = () => {
     const selStart = Math.min(pendingSelection.start, pendingSelection.end);
     const selEnd = Math.max(pendingSelection.start, pendingSelection.end);
     const side = pendingSelection.side === 'additions' ? 'new' : 'old';
-    return aiMessages.filter(m => {
+    return visibleAIMessages.filter(m => {
       const q = m.question;
       return q.filePath === filePath && q.side === side &&
         q.lineStart != null && q.lineEnd != null &&
         q.lineStart <= selEnd && q.lineEnd >= selStart;
     });
-  }, [pendingSelection, aiMessages]);
+  }, [pendingSelection, visibleAIMessages]);
 
   // Single-file surface variant (focused file = files[activeFileIndex]).
   const aiHistoryForSelection = useMemo(() => {
@@ -909,8 +980,8 @@ const ReviewApp: React.FC = () => {
 
   // General AI question from sidebar input
   const handleAskGeneral = useCallback((question: string) => {
-    askAI({ prompt: question });
-  }, [askAI]);
+    askReviewAI({ prompt: question });
+  }, [askReviewAI]);
 
   // Resizable panels
   const panelResize = useResizablePanel({
@@ -926,7 +997,17 @@ const ReviewApp: React.FC = () => {
     // Single click on the handle (no drag) collapses it.
     onClick: () => setIsFileTreeOpen(false),
   });
-  const isResizing = panelResize.isDragging || fileTreeResize.isDragging;
+  const agentTerminalResize = useResizablePanel({
+    storageKey: 'plannotator-review-agent-terminal-width',
+    defaultWidth: 420, minWidth: 280, maxWidth: 720, side: 'left',
+    onSnapClose: () => setIsAgentTerminalOpen(false),
+    onClick: () => setIsAgentTerminalOpen(false),
+  });
+  const isResizing = panelResize.isDragging || fileTreeResize.isDragging || agentTerminalResize.isDragging;
+
+  const toggleAgentTerminal = useCallback(() => {
+    setIsAgentTerminalOpen(current => !current);
+  }, []);
 
   // Dockview ready handler — stores API and wires active panel tracking.
   // Initial panel creation happens in the effect below once dockApi is set.
@@ -1382,6 +1463,7 @@ const ReviewApp: React.FC = () => {
         baseBehindRemote?: boolean;
         snapshotId?: string;
         serverConfig?: { displayName?: string; gitUser?: string };
+        agentTerminal?: AgentTerminalCapability;
       }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
@@ -1389,6 +1471,7 @@ const ReviewApp: React.FC = () => {
         setGitUser(data.serverConfig?.gitUser);
         setSnapshotId(data.snapshotId);
         setAiEnabled(data.aiEnabled !== false);
+        setAgentTerminalCapability(data.agentTerminal ?? null);
         const apiFiles = orderFilesBySections(parseDiffToFiles(data.rawPatch), data.sections);
         setDiffData({
           files: apiFiles,
@@ -1400,6 +1483,7 @@ const ReviewApp: React.FC = () => {
           gitContext: data.gitContext,
           diffOptions: data.diffOptions,
           sharingEnabled: data.sharingEnabled,
+          agentTerminal: data.agentTerminal,
         });
         setFiles(apiFiles);
         setReviewMode(data.mode ?? null);
@@ -2294,11 +2378,11 @@ const ReviewApp: React.FC = () => {
   // Ask AI about a description selection — file-less scope ask (same mechanism
   // the HTML viewer uses). The popover passes the label + selected text.
   const handleAskAIForDescription = useCallback<CommentAskAIHandler>((question, context) => {
-    askAI({
+    askReviewAI({
       prompt: question,
       scope: { kind: 'selection', label: context.label ?? 'PR description', text: context.text },
     });
-  }, [askAI]);
+  }, [askReviewAI]);
 
   // --- PR comment annotations (button-driven notes attached to a whole comment) ---
   const handleAddCommentAnnotation = useCallback((commentId: string, commentAuthor: string, commentBody: string, text: string, options?: { id?: string; artifact?: ArtifactAnnotationMeta }) => {
@@ -2338,11 +2422,11 @@ const ReviewApp: React.FC = () => {
   }, []);
 
   const handleAskAIForComment = useCallback<CommentAskAIHandler>((question, context) => {
-    askAI({
+    askReviewAI({
       prompt: question,
       scope: { kind: 'selection', label: context.label ?? 'PR comment', text: context.text },
     });
-  }, [askAI]);
+  }, [askReviewAI]);
 
   // Prose notes for the ACTIVE PR only. The full arrays keep every PR's notes
   // (and persist them to the draft) so an in-place switch loses nothing; these
@@ -2481,7 +2565,7 @@ const ReviewApp: React.FC = () => {
     onAddDescriptionAnnotation: handleAddDescriptionAnnotation,
     onSelectDescriptionAnnotation: handleSelectDescriptionAnnotation,
     onDeleteDescriptionAnnotation: handleDeleteDescriptionAnnotation,
-    ...buildContextualAIHandlers(aiAvailable, {
+    ...buildContextualAIHandlers(canUseAskAI, {
       onAskAIForDescription: handleAskAIForDescription,
       onAskAIForComment: handleAskAIForComment,
     }),
@@ -2510,11 +2594,11 @@ const ReviewApp: React.FC = () => {
     activeSearchMatch: activeSearchMatch?.filePath === files[activeFileIndex]?.path ? activeSearchMatch : null,
     searchMatches,
     allFilesActiveSearchMatch: activeSearchMatch,
-    aiAvailable,
-    aiMessages,
+    aiAvailable: canUseAskAI,
+    aiMessages: visibleAIMessages,
     onAskAI: handleAskAI,
     onAskAIForFile: handleAskAIForFile,
-    isAILoading: aiIsCreatingSession || aiIsStreaming,
+    isAILoading: isAgentTerminalReady ? false : aiIsCreatingSession || aiIsStreaming,
     onViewAIResponse: handleViewAIResponse,
     onClickAIMarker: handleClickAIMarker,
     aiHistoryForSelection,
@@ -2562,7 +2646,7 @@ const ReviewApp: React.FC = () => {
     handleToggleViewed, stagedFiles, stagingFile, stageFile,
     canStageFiles, isPathStageable, activeWorktreePath, guideRevealFile, handleGuideRevealFile, stageError, isSearchPending, debouncedSearchQuery,
     activeFileSearchMatches, activeSearchMatchId, activeSearchMatch, searchMatches,
-    aiAvailable, aiMessages, aiIsCreatingSession, aiIsStreaming,
+    canUseAskAI, visibleAIMessages, aiIsCreatingSession, aiIsStreaming, isAgentTerminalReady,
     handleAskAI, handleAskAIForFile, handleViewAIResponse, handleClickAIMarker,
     aiHistoryForSelection, getAIHistoryForFile, agentJobs.jobs, prMetadata, prContext, prArtifacts,
     isPRContextLoading, prContextError, fetchPRContext, platformUser, openDiffFile,
@@ -2981,15 +3065,43 @@ const ReviewApp: React.FC = () => {
             {shouldShowFileTree && (
               <>
                 <button
-                  onClick={() => setIsFileTreeOpen(prev => !prev)}
+                  onClick={() => {
+                    if (isAgentTerminalOpen) {
+                      setIsAgentTerminalOpen(false);
+                      setIsFileTreeOpen(true);
+                      return;
+                    }
+                    setIsFileTreeOpen(prev => !prev);
+                  }}
                   className={`h-7 w-7 flex shrink-0 items-center justify-center rounded-md transition-all focus-visible:outline-none ${
-                    isFileTreeOpen
+                    isFileTreeOpen && !isAgentTerminalOpen
                       ? 'text-primary'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                   }`}
-                  title={isFileTreeOpen ? 'Hide file tree' : 'Show file tree'}
+                  title={isFileTreeOpen && !isAgentTerminalOpen ? 'Hide file tree' : 'Show file tree'}
                 >
                   <FolderTree className="w-3.5 h-3.5" />
+                </button>
+                <div className="w-px h-5 bg-border/50 mx-1 hidden lg:block" />
+              </>
+            )}
+            {agentTerminalCapability && (
+              <>
+                <button
+                  onClick={toggleAgentTerminal}
+                  className={`relative h-7 hidden lg:flex shrink-0 items-center gap-1.5 px-2 rounded-md text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                    isAgentTerminalOpen || isAgentTerminalRunning
+                      ? 'bg-primary/15 text-primary'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                  }`}
+                  title={isAgentTerminalRunning ? 'Agent terminal running' : 'Open agent terminal'}
+                  aria-pressed={isAgentTerminalOpen}
+                >
+                  <SquareTerminal className="w-3.5 h-3.5" />
+                  <span className="hidden lg:inline">Agent</span>
+                  {isAgentTerminalRunning && !isAgentTerminalOpen && (
+                    <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary" />
+                  )}
                 </button>
                 <div className="w-px h-5 bg-border/50 mx-1 hidden lg:block" />
               </>
@@ -3002,6 +3114,7 @@ const ReviewApp: React.FC = () => {
                       markGuideHintSeen();
                       setGuideHintActive(false);
                     }
+                    setIsAgentTerminalOpen(false);
                     setGuideOpen(prev => !prev);
                   }}
                   className={`relative flex h-7 shrink-0 items-center gap-1 px-2 rounded-md text-xs font-medium transition-colors ${
@@ -3372,7 +3485,7 @@ const ReviewApp: React.FC = () => {
                 </span>
               )}
             </button>
-            {aiAvailable && (
+            {canUseAskAI && (
               <button
                 onClick={() => reviewSidebar.toggleTab('ai')}
                 className={`relative p-1.5 rounded-md transition-all ${
@@ -3412,9 +3525,12 @@ const ReviewApp: React.FC = () => {
               onOpenReviewSetup={sectionsCapable ? () => { reviewSetupIsFirstRun.current = false; setShowReviewSetup(true); } : undefined}
               onOpenExport={() => setShowExportModal(true)}
               onCopyAgentInstructions={handleCopyAgentInstructions}
-              onToggleFileTree={() => setIsFileTreeOpen(prev => !prev)}
+              onToggleFileTree={() => {
+                setIsAgentTerminalOpen(false);
+                setIsFileTreeOpen(prev => !prev);
+              }}
               onToggleSidebar={() => reviewSidebar.isOpen ? reviewSidebar.close() : reviewSidebar.open()}
-              isFileTreeOpen={isFileTreeOpen}
+              isFileTreeOpen={isFileTreeOpen && !isAgentTerminalOpen}
               isSidebarOpen={reviewSidebar.isOpen}
               agentInstructionsEnabled={!!origin}
               appVersion={appVersion}
@@ -3427,7 +3543,33 @@ const ReviewApp: React.FC = () => {
 
         {/* Main content */}
         <div className={`flex-1 flex overflow-hidden ${isResizing ? 'select-none' : ''}`}>
-          {!guideOpen && shouldShowFileTree && isFileTreeOpen && sectionsAvailable && panelView === 'sections' && (
+          {agentTerminalCapability && (isAgentTerminalOpen || isAgentTerminalRunning) && (
+            <div
+              className={isAgentTerminalOpen ? 'contents group/agent-terminal' : 'absolute left-0 top-0 h-0 w-0 overflow-hidden pointer-events-none'}
+              aria-hidden={!isAgentTerminalOpen}
+              inert={!isAgentTerminalOpen ? true : undefined}
+            >
+              <AgentTerminalPanel
+                ref={agentTerminalRef}
+                capability={agentTerminalCapability}
+                width={agentTerminalResize.width}
+                onSessionActiveChange={setIsAgentTerminalRunning}
+                onSessionReadyChange={setIsAgentTerminalReady}
+                onClose={() => setIsAgentTerminalOpen(false)}
+              />
+              {isAgentTerminalOpen && (
+                <ResizeHandle
+                  {...agentTerminalResize.handleProps}
+                  className="z-10"
+                  side="left"
+                  hideHoverTrack
+                  tooltip={RESIZE_HANDLE_TOOLTIP}
+                  onCollapse={() => setIsAgentTerminalOpen(false)}
+                />
+              )}
+            </div>
+          )}
+          {!isAgentTerminalOpen && !guideOpen && shouldShowFileTree && isFileTreeOpen && sectionsAvailable && panelView === 'sections' && (
             <div className="contents group/sidebar">
               <SectionsPanel
                 files={files}
@@ -3481,7 +3623,7 @@ const ReviewApp: React.FC = () => {
               <ResizeHandle {...fileTreeResize.handleProps} className="z-10" side="left" hideHoverTrack tooltip={RESIZE_HANDLE_TOOLTIP} onCollapse={() => setIsFileTreeOpen(false)} />
             </div>
           )}
-          {!guideOpen && shouldShowFileTree && isFileTreeOpen && showCommitsPanel && (
+          {!isAgentTerminalOpen && !guideOpen && shouldShowFileTree && isFileTreeOpen && showCommitsPanel && (
             <div className="contents group/sidebar">
               <CommitsPanel
                 width={fileTreeResize.width}
@@ -3501,7 +3643,7 @@ const ReviewApp: React.FC = () => {
               <ResizeHandle {...fileTreeResize.handleProps} className="z-10" side="left" hideHoverTrack tooltip={RESIZE_HANDLE_TOOLTIP} onCollapse={() => setIsFileTreeOpen(false)} />
             </div>
           )}
-          {!guideOpen && shouldShowFileTree && isFileTreeOpen && !(sectionsAvailable && panelView === 'sections') && !showCommitsPanel && (
+          {!isAgentTerminalOpen && !guideOpen && shouldShowFileTree && isFileTreeOpen && !(sectionsAvailable && panelView === 'sections') && !showCommitsPanel && (
             <div className="contents group/sidebar">
               <FileTree
                 files={files}
@@ -3720,21 +3862,21 @@ const ReviewApp: React.FC = () => {
                 onSelectCommentAnnotation={handleSelectCommentAnnotation}
                 onDeleteCommentAnnotation={handleDeleteCommentAnnotation}
                 prMetadata={prMetadata}
-                aiAvailable={aiAvailable}
-                aiMessages={aiMessages}
-                isAICreatingSession={aiIsCreatingSession}
-                isAIStreaming={aiIsStreaming}
-                onAIStop={abortAI}
+                aiAvailable={canUseAskAI}
+                aiMessages={visibleAIMessages}
+                isAICreatingSession={isAgentTerminalReady ? false : aiIsCreatingSession}
+                isAIStreaming={isAgentTerminalReady ? false : aiIsStreaming}
+                onAIStop={isAgentTerminalReady ? undefined : abortAI}
                 onScrollToAILines={handleScrollToAILines}
                 activeFilePath={files[activeFileIndex]?.path}
                 scrollToQuestionId={scrollToQuestionId}
                 onAskGeneral={handleAskGeneral}
-                aiPermissionRequests={aiPermissionRequests}
-                onRespondToPermission={respondToAIPermission}
-                aiProviders={aiProviders}
-                aiConfig={aiConfig}
-                onAIConfigChange={handleAIConfigChange}
-                hasAISession={!!aiSessionId}
+                aiPermissionRequests={isAgentTerminalReady ? [] : aiPermissionRequests}
+                onRespondToPermission={isAgentTerminalReady ? undefined : respondToAIPermission}
+                aiProviders={visibleAIProviders}
+                aiConfig={visibleAIConfig}
+                onAIConfigChange={isAgentTerminalReady ? undefined : handleAIConfigChange}
+                hasAISession={isAgentTerminalReady ? false : !!aiSessionId}
                 agentJobs={agentJobs.jobs}
                 agentCapabilities={agentJobs.capabilities}
                 onAgentLaunch={agentJobs.launchJob}

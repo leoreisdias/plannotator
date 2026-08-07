@@ -125,9 +125,9 @@ import { useCheckboxOverrides } from './hooks/useCheckboxOverrides';
 import { usePlanDiffViewAutoExit } from './hooks/usePlanDiffViewAutoExit';
 import { AppHeader } from './components/AppHeader';
 import {
-  AnnotateAgentTerminalPanel,
-  type AnnotateAgentTerminalPanelHandle,
-} from './components/AnnotateAgentTerminalPanel';
+  AgentTerminalPanel,
+  type AgentTerminalPanelHandle,
+} from '@plannotator/ui/components/AgentTerminalPanel';
 import {
   buildAgentTerminalDeliveryRecord,
   buildTerminalAskPrompt,
@@ -459,7 +459,7 @@ const App: React.FC = () => {
   const [agentTerminalDelivery, setAgentTerminalDeliveryState] = useState<AgentTerminalDeliveryRecord | null>(null);
   const agentTerminalDeliveryRef = useRef<AgentTerminalDeliveryRecord | null>(null);
   const agentTerminalSessionSeqRef = useRef(0);
-  const agentTerminalRef = useRef<AnnotateAgentTerminalPanelHandle>(null);
+  const agentTerminalRef = useRef<AgentTerminalPanelHandle>(null);
   const [wideModeType, setWideModeType] = useState<WideModeType | null>(null);
   const wideModeSnapshotRef = useRef<WideModeLayoutSnapshot | null>(null);
   const initialSidebarPreferenceAppliedRef = useRef(false);
@@ -4237,7 +4237,7 @@ const App: React.FC = () => {
               aria-hidden={!isAgentTerminalOpen}
               inert={!isAgentTerminalOpen ? true : undefined}
             >
-              <AnnotateAgentTerminalPanel
+              <AgentTerminalPanel
                 ref={agentTerminalRef}
                 capability={agentTerminalCapability}
                 width={`var(--agent-terminal-w, ${agentTerminalResize.width}px)`}

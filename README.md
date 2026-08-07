@@ -437,7 +437,7 @@ implementation architecture.
 | `PLANNOTATOR_REMOTE` | `1`/`true` for remote mode, `0`/`false` for local, unset for SSH auto-detection |
 | `PLANNOTATOR_PORT` | Fixed port (default: random locally, `19432` remote) |
 | `PLANNOTATOR_BROWSER` | Custom browser to open plans in |
-| `PLANNOTATOR_AI` | `disabled` to disable Ask AI, Review Agents, and Guided Review; the annotate agent terminal is separate |
+| `PLANNOTATOR_AI` | `disabled` to disable Ask AI, Review Agents, and Guided Review; the Annotate/Review agent terminal is separate |
 | `PLANNOTATOR_SHARE` | `disabled` to turn off URL sharing |
 | `PLANNOTATOR_SHARE_URL` | Custom base URL for share links (self-hosted portal) |
 | `PLANNOTATOR_PASTE_URL` | Base URL of the paste service API |

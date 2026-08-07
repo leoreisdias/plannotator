@@ -118,6 +118,8 @@ import {
   BUILTIN_DEFAULT_PROFILE,
   type ReviewProfilesResponse,
 } from "@plannotator/shared/review-profiles";
+import { isAgentTerminalWsRoute } from "@plannotator/shared/agent-terminal";
+import { createBunAgentTerminalBridge } from "./agent-terminal";
 
 // Review ingestion completion semantics (REVIEW_OUTPUT_FAILED,
 // markJobReviewFailed) now live in @plannotator/shared/agent-jobs.
@@ -1404,6 +1406,11 @@ export async function startReviewServer(
     resolveDecision = resolve;
   });
 
+  const agentTerminal = await createBunAgentTerminalBridge({
+    enabled: true,
+    cwd: resolveAgentCwd,
+  });
+
   const server = await startBunServerOnAvailablePort((port) =>
     Bun.serve({
         hostname: getServerHostname(),
@@ -1415,6 +1422,16 @@ export async function startReviewServer(
 
         async fetch(req, server) {
           const url = new URL(req.url);
+
+          if (agentTerminal.matches(url.pathname)) {
+            if (agentTerminal.capability.enabled && agentTerminal.upgrade(req, server)) {
+              return;
+            }
+            return new Response("Agent terminal is unavailable", { status: 404 });
+          }
+          if (isAgentTerminalWsRoute(url.pathname)) {
+            return new Response("Agent terminal is unavailable", { status: 404 });
+          }
 
           // API: Get tour result
           if (url.pathname.match(/^\/api\/tour\/[^/]+$/) && req.method === "GET") {
@@ -1597,6 +1614,9 @@ export async function startReviewServer(
               ...(servedError && { error: servedError }),
               semanticDiff: await getSemanticDiffAdvert(servedDiffType as DiffType),
               serverConfig: getServerConfig(gitUser),
+              agentTerminal: agentTerminal.capability.enabled
+                ? { ...agentTerminal.capability, cwd: resolveAgentCwd() }
+                : agentTerminal.capability,
             });
           }
 
@@ -2885,6 +2905,8 @@ export async function startReviewServer(
           });
         },
 
+        websocket: agentTerminal.websocket,
+
         error(err) {
           console.error("[plannotator] Server error:", err);
           return new Response(
@@ -2914,6 +2936,7 @@ export async function startReviewServer(
       process.removeListener("exit", exitHandler);
       agentJobs.killAll();
       aiRuntime?.dispose();
+      agentTerminal.dispose();
       server.stop();
       // Invoke cleanup callback (e.g., remove temp worktree)
       if (options.onCleanup) {

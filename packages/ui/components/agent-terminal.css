@@ -1,0 +1,23 @@
+/* Keep xterm's scrollback layer aligned with the host app terminal palette. */
+[data-agent-terminal="true"] .webtui-shell {
+  background-color: var(--webtui-background) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+
+[data-agent-terminal="true"] .webtui-terminal,
+[data-agent-terminal="true"] .xterm,
+[data-agent-terminal="true"] .xterm-screen,
+[data-agent-terminal="true"] .webtui-shell .xterm-viewport {
+  background-color: var(--webtui-background) !important;
+}
+
+[data-agent-terminal="true"] .webtui-shell .xterm-viewport {
+  scrollbar-width: none;
+}
+
+[data-agent-terminal="true"] .webtui-shell .xterm-viewport::-webkit-scrollbar,
+[data-agent-terminal="true"] .webtui-shell .xterm-scrollbar {
+  display: none !important;
+  width: 0 !important;
+}
