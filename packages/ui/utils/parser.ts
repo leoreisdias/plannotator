@@ -1,5 +1,6 @@
 import type { Block, Annotation, CodeAnnotation, EditorAnnotation, ImageAttachment } from '../types';
 import { planDenyFeedback } from '@plannotator/core/feedback-templates';
+import { skillReferenceExportBlock } from './skillReferences';
 
 /**
  * Parsed YAML frontmatter as key-value pairs.
@@ -1097,6 +1098,32 @@ const blockEndLine = (block: Block): number => {
 
 /** Resolve the source-line label for a single annotation.
  *  Returns null for global comments, diff-view annotations, or missing blocks. */
+/** Multi-target raw-HTML comments: list every ADDITIONAL element the one
+ *  comment covers (the primary target is already quoted as `originalText`),
+ *  labeled with the semantic hover label plus a short excerpt so the agent
+ *  reading the feedback sees every referenced element. Emits nothing for
+ *  single-target annotations, keeping their output byte-identical. */
+const additionalTargetsExportBlock = (ann: any): string => {
+  const targets = ann?.htmlAdditionalTargets;
+  if (!Array.isArray(targets) || targets.length === 0) return '';
+  // Leading blank line: the preceding comment line is a `> blockquote`, and
+  // markdown lazy continuation would otherwise fold this block into it.
+  let block = `\n**Also applies to ${targets.length} more element${targets.length > 1 ? 's' : ''}:**\n`;
+  targets.forEach((target: any) => {
+    // Labels and texts are page-controlled (aria-label etc.). The DTO
+    // boundary already collapses label whitespace; do it here again (defense
+    // in depth) so persisted pre-fix data can never smuggle newlines — and
+    // with them fake markdown structure — into agent-read feedback.
+    const rawLabel = typeof target?.label === 'string' ? target.label.replace(/\s+/g, ' ').trim() : '';
+    const label = rawLabel ? `[${rawLabel}] ` : '';
+    const raw = typeof target?.text === 'string' ? target.text : '';
+    const excerpt = raw.replace(/\s+/g, ' ').trim();
+    const clipped = excerpt.length > 120 ? `${excerpt.slice(0, 120)}…` : excerpt;
+    block += `- ${label}"${clipped}"\n`;
+  });
+  return block;
+};
+
 const lineLabelForAnnotation = (blocks: Block[], ann: any): string | null => {
   if (!ann.blockId || ann.type === 'GLOBAL_COMMENT') return null;
   if (typeof ann.blockId === 'string' && ann.blockId.startsWith('diff-block-')) return null;
@@ -1126,6 +1153,10 @@ export const exportAnnotations = (
     if (blockA !== blockB) return blockA - blockB;
     return a.startOffset - b.startOffset;
   });
+
+  // One injection per export: a human-only skill referenced by several
+  // comments has its instructions injected once (see skillReferenceExportBlock).
+  const injectedSkills = new Set<string>();
 
   let output = `# ${title}\n\n`;
 
@@ -1183,6 +1214,17 @@ export const exportAnnotations = (
         break;
     }
 
+    // Multi-target raw-HTML comments list every additional covered element.
+    output += additionalTargetsExportBlock(ann);
+
+    // Skill references in the comment text (no-op unless a catalog is
+    // registered). An annotation carrying a `source` arrived through the
+    // external-annotations API, not from the reviewer — it may list skills
+    // but must never cause a human-only skill's instructions to be injected.
+    if (!ann.isQuickLabel) {
+      output += skillReferenceExportBlock(ann.text, injectedSkills, { external: !!ann.source });
+    }
+
     // Add attached images for this annotation
     if (ann.images && ann.images.length > 0) {
       output += `**Attached images:**\n`;
@@ -1226,6 +1268,9 @@ export const exportLinkedDocAnnotations = (
   docAnnotations: Map<string, LinkedDocAnnotationEntry>
 ): string => {
   let output = `\n# Linked Document Feedback\n\nThe following feedback is on documents referenced in the plan.\n\n`;
+
+  // One injection per export, across all linked documents.
+  const injectedSkills = new Set<string>();
 
   for (const [filepath, { annotations, globalAttachments, blocks: docBlocks, isConverted }] of docAnnotations) {
     if (annotations.length === 0 && globalAttachments.length === 0) continue;
@@ -1273,6 +1318,12 @@ export const exportLinkedDocAnnotations = (
           break;
       }
 
+      // Multi-target raw-HTML comments list every additional covered element.
+      output += additionalTargetsExportBlock(ann);
+
+      // External (tool-sourced) comments list skills but never inject.
+      output += skillReferenceExportBlock(ann.text, injectedSkills, { external: !!ann.source });
+
       if (ann.images && ann.images.length > 0) {
         output += `**Attached images:**\n`;
         ann.images.forEach((img: ImageAttachment) => {
@@ -1316,6 +1367,8 @@ export const exportCodeFileAnnotations = (annotations: CodeAnnotation[]): string
   if (annotations.length === 0) return '';
 
   let output = `\n# Code File Feedback\n\nThe following feedback is on code files referenced from the reviewed document.\n\n`;
+  // One injection per export, across all code-file comments.
+  const injectedSkills = new Set<string>();
   const sorted = [...annotations].sort((a, b) => {
     if (a.filePath !== b.filePath) return a.filePath.localeCompare(b.filePath);
     if (a.lineStart !== b.lineStart) return a.lineStart - b.lineStart;
@@ -1334,6 +1387,8 @@ export const exportCodeFileAnnotations = (annotations: CodeAnnotation[]): string
     if (ann.text) {
       output += `> ${ann.text}\n`;
     }
+    // External (tool-sourced) comments list skills but never inject.
+    output += skillReferenceExportBlock(ann.text, injectedSkills, { external: !!ann.source });
     if (ann.images && ann.images.length > 0) {
       output += `**Attached images:**\n`;
       ann.images.forEach((img) => {

@@ -141,7 +141,7 @@ claude --plugin-dir ./apps/hook
 | `PLANNOTATOR_PASTE_URL` | Base URL of the paste service API for short URL sharing. Default: `https://plannotator-paste.plannotator.workers.dev`. |
 | `PLANNOTATOR_ORIGIN` | Explicit agent-origin override at the top of the detection chain. Valid values: `claude-code`, `amp`, `droid`, `opencode`, `codex`, `copilot-cli`, `gemini-cli`, `kiro-cli`, `pi`. Invalid values silently fall through to env-based detection. Unset by default. |
 | `PLANNOTATOR_JINA` | Set to `0` / `false` to disable Jina Reader for URL annotation, or `1` / `true` to enable. Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "jina": false }`) or per-invocation via `--no-jina`. |
-| `PLANNOTATOR_ANNOTATE_HISTORY` | Set to `0` / `false` to disable per-file version history in annotate mode (no copies of annotated files are written to the data dir; the annotate version diff is unavailable). Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "annotateHistory": false }`); the env var takes precedence. |
+| `PLANNOTATOR_ANNOTATE_HISTORY` | Set to `0` / `false` to disable ALL annotate-session writes to the data dir: per-file version history (no copies of annotated files are written; the annotate version diff is unavailable) AND the durable submitted-feedback records (#678) that single-local-file annotate sessions otherwise write to `history/{project}/{slug}/submissions/` before deleting the draft on submit. Disabling it keeps annotate sessions fully stateless but also gives up that submit crash-recovery record. URL / folder / annotate-last sessions never write either kind of data regardless of this flag. Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "annotateHistory": false }`); the env var takes precedence. |
 | `PLANNOTATOR_GUIDE_HISTORY` | Set to `0` / `false` to disable persisting successful Guided Reviews (no guide copies are written to the data dir; the "Previous guides" list is then never populated, though already-saved guides remain readable and listed). Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "guideHistory": false }`); the env var takes precedence. |
 | `PLANNOTATOR_CURSOR_SANDBOX` | Set to `0` / `false` / `disabled` to stop passing `--sandbox enabled` when launching Cursor's `agent` CLI for review jobs — the flag pair is omitted entirely, deferring to the user's own Cursor Agent sandbox configuration. For systems where Cursor's sandbox cannot start (NixOS, AppArmor-restricted Linux). Default: enabled (`--sandbox enabled` is passed). Can also be set via `~/.plannotator/config.json` (`{ "cursorSandbox": false }`); the env var takes precedence. Note: opting out means the review job's write protection relies on `--mode ask` plus the user's own Cursor configuration. |
 | `PLANNOTATOR_TODO_PROVIDER` | Set to `off` / `0` / `false` / `disabled` to stop mirroring the approved plan checklist into an editable todo provider during execution. Default: enabled, which syncs only when a provider is detected (currently pi-todos: detected when its todo directory exists — `<cwd>/.pi/todos` by default, or wherever `PI_TODO_PATH` redirects it when set). The repo-implied `<cwd>/.pi/todos` must realpath to a location inside the project or the provider reads as absent and never writes, so a symlink committed into a hostile repo cannot redirect todo writes out of it; an explicitly set `PI_TODO_PATH` is the user's own choice and is honored verbatim, including outside the project. The mirror is additive — the progress widget is unaffected either way — and sync is one-way, so provider-side edits never feed back into plan execution. Can also be set via `~/.plannotator/config.json` (`{ "todoProvider": "off" }`); the env var takes precedence. |
@@ -306,7 +306,7 @@ User runs plannotator archive (CLI)
         ↓
 Server starts in mode:"archive", reads ~/.plannotator/plans/
         ↓
-Browser opens read-only archive viewer (sharing disabled)
+Browser opens read-only archive viewer
         ↓
 User browses saved plan decisions with approved/denied badges
         ↓
@@ -333,6 +333,8 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/image`          | GET    | Serve image by path query param            |
 | `/api/upload`         | POST   | Upload image, returns `{ path, originalName }` |
 | `/api/obsidian/vaults`| GET    | Detect available Obsidian vaults           |
+| `/api/skills`         | GET    | List global agent skills for comment skill references (`{ skills: [{ name, root, description?, humanOnly, dir }] }`) |
+| `/api/skills/content` | GET    | SKILL.md contents of one discovered skill for human-only feedback injection (`?name=<skill>`) returns `{ skill: { name, dir, path, content, truncated, humanOnly } }`; the name is matched against discovery only, never used as a path |
 | `/api/reference/obsidian/files` | GET | List vault markdown files as nested tree (`?vaultPath=<path>`) |
 | `/api/reference/obsidian/doc`   | GET | Read a vault markdown file (`?vaultPath=<path>&path=<file>`) |
 | `/api/plan/vscode-diff` | POST   | Open diff in VS Code (body: baseVersion)   |
@@ -422,6 +424,8 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/upload`         | POST   | Upload image, returns `{ path, originalName }` |
 | `/api/doc`            | GET    | Serve linked .md/.mdx/.html file or code file (`?path=<path>&base=<dir>`) |
 | `/api/doc/exists`     | POST   | Batch-validate code-file paths (body: `{ paths: string[], base?: string }`) |
+| `/api/skills`         | GET    | List global agent skills for comment skill references (`{ skills: [{ name, root, description?, humanOnly, dir }] }`) |
+| `/api/skills/content` | GET    | SKILL.md contents of one discovered skill for human-only feedback injection (`?name=<skill>`) returns `{ skill: { name, dir, path, content, truncated, humanOnly } }`; the name is matched against discovery only, never used as a path |
 | `/api/draft`          | GET/POST/DELETE | Auto-save annotation drafts to survive server crashes |
 | `/api/annotate/client-lease` | GET (SSE) | Client lease for local direct structured gates: each open stream is one connected review surface. 404 when the capability is not advertised. |
 | `/api/agent-terminal/pty/<token>` | WebSocket | Tokenized PTY bridge for the optional annotate-mode agent terminal |
@@ -454,7 +458,7 @@ Every plan is automatically saved to `~/.plannotator/history/{project}/{slug}/` 
 
 This powers the version history API (`/api/plan/version`, `/api/plan/versions`) and the plan diff system.
 
-**Annotate mode** also saves history on open, so the same version diff works when annotating a standalone `.md`/`.txt`/`.html` file (or any other supported plain-text file, e.g. `.yaml`/`.json`/`.toml`). It keys the slug by **file path** — `annotate-{sanitized-basename}-{hash8}` — rather than heading + date, so re-opening the same file groups its versions even as its content (and headings) change. **Note this writes a copy of each annotated file's content** under `~/.plannotator/history/` (or `PLANNOTATOR_DATA_DIR`); disable via `PLANNOTATOR_ANNOTATE_HISTORY=0` or `{ "annotateHistory": false }` in `~/.plannotator/config.json` to keep annotate sessions stateless (the version diff is then unavailable). For `--render-html` files the diff is rendered as the real page with inline `<ins>`/`<del>` highlights via `htmlDiff()` (`packages/shared/html-diff.ts`).
+**Annotate mode** also saves history on open, so the same version diff works when annotating a standalone `.md`/`.txt`/`.html` file (or any other supported plain-text file, e.g. `.yaml`/`.json`/`.toml`). It keys the slug by **file path** — `annotate-{sanitized-basename}-{hash8}` — rather than heading + date, so re-opening the same file groups its versions even as its content (and headings) change. **Note this writes a copy of each annotated file's content** under `~/.plannotator/history/` (or `PLANNOTATOR_DATA_DIR`); disable via `PLANNOTATOR_ANNOTATE_HISTORY=0` or `{ "annotateHistory": false }` in `~/.plannotator/config.json` to keep annotate sessions stateless (the version diff is then unavailable, and the durable submitted-feedback records described in the env-var table are also skipped). Single-local-file annotate sessions additionally write each submitted decision to `history/{project}/{slug}/submissions/{timestamp}.md` BEFORE deleting the annotation draft, so feedback survives an agent-side timeout (#678); a failed record write keeps the draft as the recovery copy. For `--render-html` files the diff is rendered as the real page with inline `<ins>`/`<del>` highlights via `htmlDiff()` (`packages/shared/html-diff.ts`).
 
 History saves independently of the `planSave` user setting (which controls decision snapshots in `~/.plannotator/plans/`). Storage functions live in `packages/shared/storage.ts` (runtime-agnostic, re-exported by `packages/server/storage.ts`). Pi copies the shared files at build time. Slug format: `{sanitized-heading}-YYYY-MM-DD` (heading first for readability).
 
@@ -505,8 +509,23 @@ interface Annotation {
   images?: ImageAttachment[]; // Attached images with names
   source?: string; // External tool identifier (e.g., "eslint") — set when annotation comes from external API
   diffContext?: 'added' | 'removed' | 'modified'; // Set when annotation created in plan diff view
+  htmlAnchor?: HtmlElementAnchor; // Raw-HTML pinpoint: serialized element anchor for reliable restoration
+  htmlAdditionalTargets?: HtmlAnnotationTarget[]; // Raw-HTML shift-click multi-select: extra elements this one comment covers
   startMeta?: { parentTagName; parentIndex; textOffset };
   endMeta?: { parentTagName; parentIndex; textOffset };
+}
+
+interface HtmlElementAnchor {
+  selector: string; // verified-unique CSS selector built in the viewer bridge
+  tagName: string;
+  text?: string; // normalized text snapshot; weak selectors fail closed against it
+  point?: { x: number; y: number }; // normalized (0..1) selected point inside the element's rect, used by placed markers to reproject against the element's current geometry
+}
+
+interface HtmlAnnotationTarget {
+  label?: string; // semantic label from the pinpoint hover cascade (e.g. "Button")
+  text: string; // capped element text, or an element description when text-less
+  anchor?: HtmlElementAnchor; // absent when anchoring failed closed
 }
 
 interface Block {
@@ -545,6 +564,10 @@ interface Block {
 **Redline mode:** User selects text → auto-creates DELETION annotation
 
 Text highlighting uses `web-highlighter` library. Code blocks use manual `<mark>` wrapping (web-highlighter can't select inside `<pre>`).
+
+**Raw-HTML annotate:** the sandboxed viewer never mutates the visited page's DOM. Committed annotations render as numbered placed comment markers plus overlay-projected highlight rectangles inside a shadow-rooted fixed overlay host: the durable anchor data (element selector, text snapshot, normalized selected point) is persisted, and the markers/highlights are disposable projections re-resolved from it on every reconcile. Shift-click multi-select joins additional elements to one comment (`htmlAdditionalTargets`).
+
+Known limitation: printing a raw-HTML annotate session prints highlight stripes from a best-effort absolute-coordinate layer and is degraded inside the iframe (pre-existing); element-only targets (SVG anchors, multi-select additional element targets) have no print representation.
 
 ## Keyboard Shortcuts
 
@@ -601,6 +624,8 @@ type ShareableAnnotation =
 2. Find text positions in rendered DOM via text search
 3. Apply `<mark>` highlights
 4. Clear hash from URL (prevents re-parse on refresh)
+
+Known limitation: share links intentionally do not carry HTML element anchors or additional multi-select targets. Restore on the raw-HTML surface is text-search based; this is the contract asserted by `sharing.multiTarget.test.ts`.
 
 ## Settings Persistence
 
