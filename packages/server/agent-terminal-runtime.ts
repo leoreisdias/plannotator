@@ -25,9 +25,7 @@ import type { AgentTerminalDisabledReason } from "@plannotator/shared/agent-term
 // @ts-ignore - Bun import attribute for text
 import nodeAgentTerminalSidecarSource from "./agent-terminal-node-sidecar.mjs" with { type: "text" };
 
-export const AGENT_TERMINAL_WEBTUI_VERSION = "0.1.0-canary.2e78ba7";
-export const AGENT_TERMINAL_WEBTUI_INSTALL_SPEC =
-  "https://github.com/leoreisdias/webtui/releases/download/canary-2e78ba7/plannotator-webtui-0.1.0-canary.2e78ba7.tgz";
+export const AGENT_TERMINAL_WEBTUI_VERSION = "0.1.0";
 
 const NODE_VERSION_TIMEOUT_MS = 3_000;
 const NODE_IMPORT_TIMEOUT_MS = 5_000;
@@ -229,7 +227,7 @@ export async function installAgentTerminalRuntime(): Promise<AgentTerminalRuntim
       "--omit=dev",
       "--no-audit",
       "--no-fund",
-      AGENT_TERMINAL_WEBTUI_INSTALL_SPEC,
+      `@plannotator/webtui@${AGENT_TERMINAL_WEBTUI_VERSION}`,
     ],
     { cwd: runtimeDir, timeoutMs: NPM_INSTALL_TIMEOUT_MS },
   );
@@ -279,7 +277,7 @@ function writeRuntimePackageJson(runtimeDir: string): void {
     private: true,
     type: "module",
     dependencies: {
-      "@plannotator/webtui": AGENT_TERMINAL_WEBTUI_INSTALL_SPEC,
+      "@plannotator/webtui": AGENT_TERMINAL_WEBTUI_VERSION,
     },
   };
   writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`, "utf8");

@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
-  AGENT_TERMINAL_WEBTUI_INSTALL_SPEC,
   AGENT_TERMINAL_WEBTUI_VERSION,
   installAgentTerminalRuntime,
   resolveBundledAgentTerminalSidecarPath,
@@ -66,11 +65,6 @@ describe("agent terminal runtime", () => {
   });
 
   test("WebTUI vendor version is pinned consistently", () => {
-    expect(AGENT_TERMINAL_WEBTUI_VERSION).toBe("0.1.0-canary.2e78ba7");
-    expect(AGENT_TERMINAL_WEBTUI_INSTALL_SPEC).toBe(
-      "https://github.com/leoreisdias/webtui/releases/download/canary-2e78ba7/plannotator-webtui-0.1.0-canary.2e78ba7.tgz",
-    );
-
     const repoRoot = join(import.meta.dir, "..", "..");
     const manifests = [
       "packages/server/package.json",
@@ -82,11 +76,11 @@ describe("agent terminal runtime", () => {
       const parsed = JSON.parse(readFileSync(join(repoRoot, manifest), "utf8")) as {
         dependencies?: Record<string, string>;
       };
-      expect(parsed.dependencies?.["@plannotator/webtui"]).toBe(AGENT_TERMINAL_WEBTUI_INSTALL_SPEC);
+      expect(parsed.dependencies?.["@plannotator/webtui"]).toBe(AGENT_TERMINAL_WEBTUI_VERSION);
     }
 
     const releaseWorkflow = readFileSync(join(repoRoot, ".github", "workflows", "release.yml"), "utf8");
-    const workflowVersions = [...releaseWorkflow.matchAll(/webtui-([^/"\\\s]+)/g)].map((match) => match[1]);
+    const workflowVersions = [...releaseWorkflow.matchAll(/webtui-(\d+\.\d+\.\d+)/g)].map((match) => match[1]);
     expect(workflowVersions.length).toBeGreaterThanOrEqual(2);
     expect(new Set(workflowVersions)).toEqual(new Set([AGENT_TERMINAL_WEBTUI_VERSION]));
   });
