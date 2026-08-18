@@ -61,6 +61,11 @@
  *    - Removes recognized installer-owned components across supported hosts
  *    - Preserves local data by default; `--purge` removes known local data
  *
+ * 14. Guide tools (`plannotator guide list|export|share|unshare`):
+ *    - List saved Guided Reviews; export one (or a snapshot JSON) as a portable
+ *      HTML file whose viewer loads from guides.show; share one as a link on
+ *      guides.show (encrypted by default) and remove it again
+ *
  * Global flags:
  *   --help             - Show top-level usage information
  *   --version, -v      - Print version and exit
@@ -79,6 +84,7 @@ import {
   startReviewServer,
   handleReviewServerReady,
 } from "@plannotator/server/review";
+import { runGuideCli } from "@plannotator/server/guide-cli";
 import {
   startAnnotateServer,
   handleAnnotateServerReady,
@@ -104,6 +110,8 @@ import {
 import { createWorktreePool, type WorktreePool, type PoolEntry } from "@plannotator/shared/worktree-pool";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getCliInstallUrl, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
+import { enableTailscaleServe } from "@plannotator/server/tailscale-serve";
+import { writeUrlQr } from "@plannotator/server/qr";
 import { resolveAnnotateTarget } from "./annotate-resolution";
 import { rmSync, realpathSync, existsSync } from "fs";
 import { parseRemoteUrl } from "@plannotator/shared/repo";
@@ -118,6 +126,7 @@ import { registerSession, unregisterSession, listSessions } from "@plannotator/s
 import { openBrowser } from "@plannotator/server/browser";
 import { inlineHtmlLocalAssets } from "@plannotator/server/html-assets";
 import { installAgentTerminalRuntime } from "@plannotator/server/agent-terminal-runtime";
+import { installCallFlowRuntime } from "@plannotator/shared/call-flow";
 import {
   createDefaultUninstallEnvironment,
   formatPurgeWarning,
@@ -213,6 +222,73 @@ const browserIdx = args.indexOf("--browser");
 if (browserIdx !== -1 && args[browserIdx + 1]) {
   process.env.PLANNOTATOR_BROWSER = args[browserIdx + 1];
   args.splice(browserIdx, 2);
+}
+
+// Transport flag: --tailscale (review / annotate / annotate-last) — publish
+// the session over the user's tailnet via `tailscale serve`. The server stays
+// LOOPBACK-bound: serve provides reachability plus TLS, so remote mode's wide
+// bind is redundant and would only broaden exposure. Forcing local mode here
+// (before any port/bind decision) is the safer resolution of the
+// --tailscale + PLANNOTATOR_REMOTE combination; it also restores the random
+// local port, so simultaneous sessions get distinct serve mappings.
+const TAILSCALE_COMMANDS = new Set(["review", "annotate", "annotate-last", "last"]);
+const tailscaleIdx = args.indexOf("--tailscale");
+const tailscaleFlag = tailscaleIdx !== -1;
+if (tailscaleFlag) {
+  args.splice(tailscaleIdx, 1);
+  if (!TAILSCALE_COMMANDS.has(args[0] ?? "")) {
+    console.error(
+      "--tailscale is only supported with: plannotator review, annotate, annotate-last (last)",
+    );
+    process.exit(1);
+  }
+  if (isRemoteSession()) {
+    process.stderr.write(
+      "[plannotator] --tailscale keeps the server loopback-bound behind `tailscale serve`; ignoring remote mode (PLANNOTATOR_REMOTE/SSH detection) for this session.\n",
+    );
+  }
+  process.env.PLANNOTATOR_REMOTE = "0";
+  // urlHost is irrelevant here — the advertised URL comes from tailscale
+  // serve, and the session is local-bound. An empty-but-set env var also
+  // suppresses a config-file urlHost, avoiding the misleading
+  // "set PLANNOTATOR_REMOTE=1" local-session warning mid --tailscale run.
+  process.env.PLANNOTATOR_URL_HOST = "";
+}
+
+/**
+ * --tailscale ready path: publish the loopback port over the tailnet, print
+ * the HTTPS URL (with a QR for the device hop), and hand the reachable URL to
+ * the ready-file side channel. Never opens a local browser. Publishing
+ * failures resolve HERE with a clean actionable message and a nonzero exit —
+ * under the bang-prefix skill a hanging session blocks the whole Claude Code
+ * prompt, so this path must never leave the loopback server waiting. (The
+ * server APIs also await ready handlers and stop the server on rejection,
+ * which covers any other async onReady user.)
+ *
+ * A publish failure is a STARTUP failure: no reviewer ever saw the session.
+ * Under a strict annotate gate (--require-approval / --result-file) exit 1
+ * is reserved for "the reviewer did not approve, decision record published",
+ * so this exits through annotateStartupFailureExitCode with the strict flags
+ * the invocation parsed — exit 2 for strict gates, the documented exit 1
+ * otherwise (review and non-strict annotate; strict flags only parse on the
+ * annotate subcommand, so review sessions always take the exit-1 leg).
+ */
+async function handleTailscaleReady(port: number): Promise<void> {
+  let url: string;
+  try {
+    ({ url } = enableTailscaleServe(port));
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exit(
+      annotateStartupFailureExitCode({
+        requireApproval: requireApprovalFlag,
+        resultFile,
+      }),
+    );
+  }
+  process.stderr.write(`\n  Plannotator session ready — served over your tailnet:\n  ${url}\n\n`);
+  writeUrlQr(url);
+  await handleServerReady(url, false, port, { skipBrowserOpen: true });
 }
 
 // Global flag: --no-jina (disables Jina Reader for URL annotation)
@@ -363,11 +439,13 @@ if (args[0] === "uninstall") {
 
 if (args[0] === "install-runtime") {
   const runtime = args[1];
-  if (runtime !== "agent-terminal") {
-    console.error("Usage: plannotator install-runtime agent-terminal");
+  if (runtime !== "agent-terminal" && runtime !== "call-flow") {
+    console.error("Usage: plannotator install-runtime <agent-terminal|call-flow>");
     process.exit(1);
   }
-  const result = await installAgentTerminalRuntime();
+  const result = runtime === "call-flow"
+    ? await installCallFlowRuntime()
+    : await installAgentTerminalRuntime();
   console.log(result.message);
   process.exit(result.ok ? 0 : 1);
 }
@@ -384,7 +462,14 @@ process.on("exit", () => unregisterSession());
 // default a SIGINT/SIGTERM death skips them, leaking background-warmup
 // children and stale `git worktree` registrations (the --local PR checkout
 // cleanup below is registered on "exit"). `once` keeps a second Ctrl-C as a
-// force-quit escape hatch if cleanup ever hangs.
+// force-quit escape hatch if cleanup ever hangs. SIGHUP is deliberately NOT
+// routed here: installing any SIGHUP listener overrides the ignored
+// disposition `nohup` depends on, so a plain `nohup plannotator review &`
+// must end up with no listener and survive terminal close. The --tailscale
+// path installs its own SIGHUP→exit handler only once a serve mapping
+// actually exists (enableTailscaleServe in
+// packages/server/tailscale-serve.ts), which is the only case where terminal
+// close would otherwise leak tailnet state.
 process.once("SIGINT", () => process.exit(130));
 process.once("SIGTERM", () => process.exit(143));
 
@@ -942,6 +1027,10 @@ if (args[0] === "sessions") {
     htmlContent: reviewHtmlContent,
     onCleanup: worktreeCleanup,
     onReady: async (url, isRemote, port) => {
+      if (tailscaleFlag) {
+        await handleTailscaleReady(port);
+        return;
+      }
       handleReviewServerReady(url, isRemote, port);
 
       if (isRemote && sharingEnabled && rawPatch) {
@@ -1155,7 +1244,12 @@ if (args[0] === "sessions") {
     agentCwd: projectRoot,
     project: annotateProject,
     htmlContent: planHtmlContent,
+    tailnetPublished: tailscaleFlag,
     onReady: async (url, isRemote, port) => {
+      if (tailscaleFlag) {
+        await handleTailscaleReady(port);
+        return;
+      }
       handleAnnotateServerReady(url, isRemote, port);
 
       if (isRemote && sharingEnabled) {
@@ -1393,7 +1487,12 @@ if (args[0] === "sessions") {
     }),
     htmlContent: planHtmlContent,
     recentMessages: pickerMessages,
+    tailnetPublished: tailscaleFlag,
     onReady: async (url, isRemote, port) => {
+      if (tailscaleFlag) {
+        await handleTailscaleReady(port);
+        return;
+      }
       handleAnnotateServerReady(url, isRemote, port);
 
       if (isRemote && sharingEnabled) {
@@ -1420,6 +1519,18 @@ if (args[0] === "sessions") {
 
   emitAnnotateOutcome(result);
   process.exit(0);
+
+} else if (args[0] === "guide") {
+  // ============================================
+  // GUIDE TOOLS: list saved guides, export portable HTML, share links
+  // ============================================
+  // The guide CLI parses its own flags, and `--json` is one of them; `args`
+  // had the annotate gate flags (`--json` included) stripped above, so hand
+  // it everything after "guide" from the raw argv instead.
+  const result = await runGuideCli(rawArgs.slice(rawArgs.indexOf("guide") + 1), process.env, process.env.PLANNOTATOR_CWD || process.cwd());
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  process.exit(result.code);
 
 } else if (args[0] === "archive") {
   // ============================================

@@ -42,26 +42,36 @@ export function SemanticDiffRow({ active, onClick }: { active: boolean; onClick:
   );
 }
 
-export function EslintCheckRow({
+export function CallFlowRow({
   active,
   onClick,
-  fileCount,
+  count,
+  loading,
+  error,
 }: {
   active: boolean;
   onClick: () => void;
-  fileCount?: number;
+  count?: number;
+  loading?: boolean;
+  error?: boolean;
 }) {
   return (
     <SidebarActionRow
       active={active}
       onClick={onClick}
-      title="Run the reviewed project's local ESLint configuration"
+      title={error ? 'Call flow setup needs attention' : 'Trace how changed calls affect entry paths'}
     >
-      <span className="w-3.5 h-3.5 flex flex-shrink-0 items-center justify-center font-mono text-[10px] font-semibold" aria-hidden="true">ES</span>
-      <span>ESLint</span>
-      {fileCount !== undefined && (
-        <span className="ml-auto text-[10px] tabular-nums opacity-60">{fileCount}</span>
-      )}
+      <span className="w-3.5 h-3.5 flex flex-shrink-0 items-center justify-center font-mono" aria-hidden="true">⑂</span>
+      <span>Call flow</span>
+      <span
+        className={`ml-auto rounded bg-muted px-1.5 py-0.5 font-mono text-[9px] tabular-nums ${error ? 'text-warning' : 'text-muted-foreground'}`}
+      >
+        {error ? (
+          <><span aria-hidden="true">!</span><span className="sr-only">Call flow setup needs attention</span></>
+        ) : loading ? (
+          <><span aria-hidden="true">…</span><span className="sr-only">Call flow setup in progress</span></>
+        ) : count ?? '—'}
+      </span>
     </SidebarActionRow>
   );
 }

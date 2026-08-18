@@ -188,6 +188,11 @@ export interface HtmlViewerProps {
   onAnnotationRestoreComplete?: (missingIds: string[]) => void;
   /** Disable every annotation mutation entry point while preserving reading and navigation. */
   readOnly?: boolean;
+  /** Reports the full set of annotation ids with no live representation on
+   *  the page (fail-closed anchors hide markers rather than guess). Called
+   *  with the complete current set whenever it changes, including back to
+   *  empty on recovery. Fires in readOnly mode too. */
+  onUnanchoredChange?: (ids: string[]) => void;
   /** Accessible iframe title. */
   title?: string;
 }
@@ -222,6 +227,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onAskAI,
       onAnnotationRestoreComplete,
       readOnly = false,
+      onUnanchoredChange,
       title = "HTML Plan Viewer",
     },
     ref,
@@ -313,6 +319,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       mode,
       onResize: handleResize,
       onBridgePointer: handleBridgePointer,
+      onUnanchoredChange,
     });
 
     const multiSelectActive = !readOnly && !!hook.commentPopover && hook.draftTargets.length > 0;
@@ -512,7 +519,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         },
         "*",
       );
-      if (!readOnly && vimModeEnabled && iframe === document.activeElement) {
+      if (!readOnly && vimModeEnabled && iframe && iframe === document.activeElement) {
         // The initial parent focus can land before the sandbox bridge is ready.
         // Reassert it after configuration so raw HTML enters BLOCK immediately,
         // matching the Markdown surface instead of waiting for the first key.
@@ -746,6 +753,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               contextText={hook.commentPopover.contextText}
               initialText={hook.commentPopover.initialText}
               isGlobal={false}
+              draftKey={`html:${hook.commentPopover.draftKey}`}
               onSubmit={hook.handleCommentSubmit}
               onClose={hook.handleCommentClose}
               skillReferences

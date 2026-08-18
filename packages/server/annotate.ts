@@ -16,8 +16,8 @@ import { getRepoInfo } from "./repo";
 import type { Origin } from "@plannotator/shared/agents";
 import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl } from "./shared-handlers";
 import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, resolveAllowedDocPath, type FolderAnnotateHistory } from "./reference-handlers";
-import { handleFileBrowserFilesStream } from "./reference-watch";
-import { resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
+import { closeAllFileBrowserWatchers, handleFileBrowserFilesStream } from "./reference-watch";
+import { getExtraMarkdownExtensions, resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
 import { contentHash, deleteDraft } from "./draft";
 import { getPlanVersion, getVersionCount, listVersions } from "@plannotator/shared/storage";
 import { computeAnnotateHistory, deriveAnnotateHistorySlug, persistAnnotateSubmission, type AnnotateHistoryResult } from "@plannotator/shared/annotate-history";
@@ -44,6 +44,7 @@ import {
 } from "@plannotator/shared/annotate-client-lease";
 import { createAnnotateDecisionSettler } from "@plannotator/shared/annotate-decision";
 import { saveConfig, detectGitUser, getServerConfig, loadConfig, resolveAIEnabled, resolveAnnotateHistory } from "./config";
+import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 import { existsSync } from "fs";
 import { dirname, resolve as resolvePath } from "path";
 import { isWithinDirectory } from "@plannotator/shared/html-assets-node";
@@ -101,7 +102,10 @@ export interface AnnotateServerOptions {
    * Whether this transport can safely resolve an abandoned gate automatically.
    * Only local direct structured annotate gates (`--gate --json`, not `--hook`,
    * not remote/shared) qualify — see supportsAnnotateClientLease in
-   * apps/hook/server/annotate-output.ts.
+   * apps/hook/server/annotate-output.ts. The server additionally forces this
+   * off while `tailnetPublished` is set: `--tailscale` counts as local to the
+   * CLI predicate, but the session is reached through the serve proxy, whose
+   * disconnects would read as abandonment exactly like a remote tunnel's.
    */
   clientLeaseSupported?: boolean;
   /**
@@ -119,10 +123,19 @@ export interface AnnotateServerOptions {
   convertHtml?: boolean;
   /** CWD where the optional annotate agent terminal should launch. Defaults to process.cwd(). */
   agentCwd?: string;
+  /**
+   * The session is loopback-bound but published across the user's tailnet
+   * (--tailscale). Gates the agent terminal behind the same
+   * PLANNOTATOR_AGENT_TERMINAL_REMOTE opt-in remote mode uses: the PTY token
+   * is not an auth boundary against network peers (wsPath ships in the
+   * /api/plan capability payload), so tailnet reachability implies terminal
+   * reachability.
+   */
+  tailnetPublished?: boolean;
   /** Project name for keying per-file version history (powers the annotate version diff). */
   project?: string;
   /** Called when server starts with the URL, remote status, and port */
-  onReady?: (url: string, isRemote: boolean, port: number) => void;
+  onReady?: (url: string, isRemote: boolean, port: number) => void | Promise<void>;
 }
 
 export interface AnnotateServerResult {
@@ -173,7 +186,6 @@ export async function startAnnotateServer(
     pasteApiUrl,
     gate = false,
     approvalNotesSupported = false,
-    clientLeaseSupported = false,
     clientLeaseTestOverrides,
     rawHtml,
     renderHtml = false,
@@ -182,6 +194,16 @@ export async function startAnnotateServer(
     project,
     onReady,
   } = options;
+
+  // Effective client-lease capability. A --tailscale session forces local
+  // mode, so the CLI-side supportsAnnotateClientLease predicate reads it as
+  // local — but every client reaches it through the tailscale serve proxy,
+  // and a proxy/network disconnect longer than the grace period would
+  // auto-dismiss a live review. Same rationale that keeps the capability off
+  // for remote/shared sessions; this is the single decision point both the
+  // /api/plan advert and the SSE endpoint below read.
+  const clientLeaseSupported =
+    (options.clientLeaseSupported ?? false) && options.tailnetPublished !== true;
 
   const isRemote = isRemoteSession();
   const wslFlag = await isWSL();
@@ -194,10 +216,11 @@ export async function startAnnotateServer(
   // when rendering HTML. Only single local files (not URLs/folders/messages).
   const annotateProjectName = project ?? "_unknown";
   const annotateHistoryEnabled = resolveAnnotateHistory(loadConfig());
-  // Single local file sessions are the only ones the annotate-history contract
-  // covers: URL / folder / agent-message sessions never write session content
-  // to the data dir. Both the version history below and the durable submit
-  // records share this gate.
+  // Single local file sessions are the only ones this eager gate covers.
+  // URL and agent-message sessions never write session content to the data
+  // dir. Folder sessions do participate in per-file version history, but
+  // lazily through /api/doc (see computeFolderAnnotateHistory below), not
+  // here. The durable submit records stay single-local-file only.
   const singleFileLocalAnnotate = mode === "annotate" && !/^https?:\/\//i.test(filePath);
   let annotateHistory: AnnotateHistoryResult | null = null;
   {
@@ -254,10 +277,11 @@ export async function startAnnotateServer(
   // stopped reading), so there is no narrower condition to key off.
   //
   // Scope: identical to the version-history gate above — single local files
-  // only. annotate-last / URL / folder sessions were stateless before this
-  // record existed and STAY stateless: their submissions quote agent messages
-  // or fetched pages, which the documented annotateHistory contract never
-  // covered writing to disk.
+  // only. annotate-last / URL / folder sessions never wrote submit
+  // records and still do not: their submissions quote agent messages or
+  // fetched pages, which this record was never meant to persist. (Folder
+  // sessions do write lazy per-file version history via /api/doc; that is
+  // a separate, documented pipeline with its own gate.)
   //
   // Returns whether the draft delete may proceed: true when the record was
   // written, when there was no user content to lose, or when the session
@@ -292,6 +316,7 @@ export async function startAnnotateServer(
   const agentTerminal = await createBunAgentTerminalBridge({
     enabled: supportsAnnotateAgentTerminalMode(mode),
     cwd: agentCwd ?? process.cwd(),
+    tailnetPublished: options.tailnetPublished === true,
   });
 
   async function loadShareHtml(pathParam: string | null): Promise<Response> {
@@ -499,6 +524,10 @@ export async function startAnnotateServer(
               repoInfo,
               projectRoot: folderPath || process.cwd(),
               isWSL: wslFlag,
+              // Extra extensions the user registered as markdown (#1307).
+              // The renderer needs them to linkify relative/wiki links to
+              // sibling docs the same way it linkifies .md ones.
+              markdownExtensions: getExtraMarkdownExtensions(),
               serverConfig: getServerConfig(gitUser),
               agentTerminal: agentTerminal.capability,
               ...(recentMessages ? { recentMessages } : {}),
@@ -614,11 +643,12 @@ export async function startAnnotateServer(
           // API: Update user config (write-back to ~/.plannotator/config.json)
           if (url.pathname === "/api/config" && req.method === "POST") {
             try {
-              const body = (await req.json()) as { displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; conventionalComments?: boolean; conventionalLabels?: unknown[] | null };
+              const body = (await req.json()) as { displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; favicon?: FaviconStyle; conventionalComments?: boolean; conventionalLabels?: unknown[] | null };
               const toSave: Record<string, unknown> = {};
               if (body.displayName !== undefined) toSave.displayName = body.displayName;
               if (body.diffOptions !== undefined) toSave.diffOptions = body.diffOptions;
               if (body.theme !== undefined) toSave.theme = body.theme;
+              if (isFaviconStyle(body.favicon)) toSave.favicon = body.favicon;
               if (body.conventionalComments !== undefined) toSave.conventionalComments = body.conventionalComments;
               if (body.conventionalLabels !== undefined) toSave.conventionalLabels = body.conventionalLabels;
               if (Object.keys(toSave).length > 0) saveConfig(toSave as Parameters<typeof saveConfig>[0]);
@@ -985,9 +1015,30 @@ export async function startAnnotateServer(
   // walk yields between directories while requests remain serviceable.
   void warmFileListCache(process.cwd(), "code");
 
-  // Notify caller that server is ready
+  const stop = () => {
+    // try/finally: a throwing disposal must never leave the listener bound.
+    try {
+      closeAllFileBrowserWatchers();
+      clientLease.cancel();
+      clientLease.closeSessions();
+      aiRuntime?.dispose();
+      agentTerminal.dispose();
+    } finally {
+      server.stop();
+    }
+  };
+
+  // Notify caller that server is ready. An async ready handler that rejects
+  // (e.g. --tailscale publishing failed) must stop the server and propagate:
+  // firing-and-forgetting it would leave an unhandled rejection while the
+  // loopback server keeps listening and the session hangs forever.
   if (onReady) {
-    onReady(serverUrl, isRemote, port);
+    try {
+      await onReady(serverUrl, isRemote, port);
+    } catch (error) {
+      stop();
+      throw error;
+    }
   }
 
   return {
@@ -995,12 +1046,6 @@ export async function startAnnotateServer(
     url: serverUrl,
     isRemote,
     waitForDecision: () => decisionPromise,
-    stop: () => {
-      clientLease.cancel();
-      clientLease.closeSessions();
-      aiRuntime?.dispose();
-      agentTerminal.dispose();
-      server.stop();
-    },
+    stop,
   };
 }
