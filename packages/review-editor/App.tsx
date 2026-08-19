@@ -46,6 +46,10 @@ import {
   useReviewSearch,
   type ReviewSearchMatch,
 } from './hooks/useReviewSearch';
+import {
+  buildExplainFindingRequest,
+  isAgentGeneratedFinding,
+} from './utils/explainFinding';
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
 import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotations';
 import { useAgentJobs, jobMatchesReviewContext } from '@plannotator/ui/hooks/useAgentJobs';
@@ -653,6 +657,11 @@ const ReviewApp: React.FC = () => {
   // so this should be addressed as a broader refactor.
   const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<CodeAnnotation>({ enabled: !!origin });
   const agentJobs = useAgentJobs({ enabled: !!origin && aiUIEnabled });
+  const agentFindingSourcesKey = agentJobs.jobs.map((job) => job.source).sort().join('\0');
+  const agentFindingSources = useMemo(
+    () => new Set(agentFindingSourcesKey ? agentFindingSourcesKey.split('\0') : []),
+    [agentFindingSourcesKey],
+  );
 
   // Tour dialog state — opens as an overlay instead of a dock panel
   const [tourDialogJobId, setTourDialogJobId] = useState<string | null>(null);
@@ -1259,6 +1268,20 @@ const ReviewApp: React.FC = () => {
     if (!sha) return null;
     return { sha, subject: commitInfo?.sha === sha ? commitInfo.subject : undefined };
   }, [activeDiffBase, commitInfo]);
+  const isAILoading = aiIsCreatingSession || aiIsStreaming;
+  const handleExplainAnnotation = useCallback((id: string) => {
+    if (!aiAvailable || isAILoading) return;
+    const annotation = allAnnotationsRef.current.find((item) => item.id === id);
+    if (!annotation || !isAgentGeneratedFinding(annotation, agentFindingSources)) return;
+
+    const file = annotation.filePath
+      ? files.find((item) => item.path === annotation.filePath)
+      : undefined;
+    reviewSidebar.open('ai');
+    void askAI(buildExplainFindingRequest(annotation, file?.patch, {
+      activeCommitSha: activeCommitContext?.sha,
+    }));
+  }, [activeCommitContext?.sha, agentFindingSources, aiAvailable, askAI, files, isAILoading, reviewSidebar]);
   const activeGitButlerContext = useMemo(() => {
     if (!activeDiffBase.startsWith('gitbutler:')) return null;
     return {
@@ -2997,6 +3020,8 @@ const ReviewApp: React.FC = () => {
     onSelectAnnotation: handleSelectAnnotation,
     onNavigateToAnnotation: handleNavigateToAnnotation,
     onDeleteAnnotation: handleDeleteAnnotation,
+    onExplainAnnotation: handleExplainAnnotation,
+    agentFindingSources,
     descriptionAnnotations: visibleDescriptionAnnotations,
     selectedDescriptionAnnotationId,
     onAddDescriptionAnnotation: handleAddDescriptionAnnotation,
@@ -3040,7 +3065,7 @@ const ReviewApp: React.FC = () => {
     aiMessages,
     onAskAI: handleAskAI,
     onAskAIForFile: handleAskAIForFile,
-    isAILoading: aiIsCreatingSession || aiIsStreaming,
+    isAILoading,
     onViewAIResponse: handleViewAIResponse,
     onClickAIMarker: handleClickAIMarker,
     aiHistoryForSelection,
@@ -4591,6 +4616,8 @@ const ReviewApp: React.FC = () => {
                 onSelectAnnotation={handleSelectAnnotation}
                 onNavigateToAnnotation={handleNavigateToAnnotation}
                 onDeleteAnnotation={handleDeleteAnnotation}
+                onExplainAnnotation={aiAvailable ? handleExplainAnnotation : undefined}
+                agentFindingSources={agentFindingSources}
                 feedbackMarkdown={feedbackMarkdown}
                 width={isCompactTouchLayout ? undefined : panelResize.width}
                 editorAnnotations={visibleEditorAnnotations}
